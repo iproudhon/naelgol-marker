@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserdatastate
+xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+Package.resolved
+
+# Never commit recorded rounds or credentials
+Sessions/
+*.m4a
+*.wav
+.env
+secrets.json

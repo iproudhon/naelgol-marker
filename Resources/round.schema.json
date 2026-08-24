@@ -1,0 +1,67 @@
+{
+  "$comment": "TODO(phase-3): draft alongside the prompt. Passed as output_config.format.schema. Sketch only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["players", "holes", "conflicts"],
+  "properties": {
+    "players": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "speakerClusters"],
+        "properties": {
+          "name": { "type": "string" },
+          "speakerClusters": { "type": "array", "items": { "type": "string" } },
+          "clusterConfidence": { "type": "number" }
+        }
+      }
+    },
+    "holes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "shots"],
+        "properties": {
+          "number": { "type": "integer" },
+          "par": { "type": "integer" },
+          "elevationDeltaM": { "type": "number" },
+          "scores": { "type": "object", "additionalProperties": { "type": "integer" } },
+          "shots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["player", "index", "confidence"],
+              "properties": {
+                "player": { "type": "string" },
+                "index": { "type": "integer" },
+                "t": { "type": "integer" },
+                "lat": { "type": "number" },
+                "lon": { "type": "number" },
+                "club": { "type": "string" },
+                "lie": { "type": "string" },
+                "evidence": { "type": "string" },
+                "confidence": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description"],
+        "properties": {
+          "hole": { "type": "integer" },
+          "player": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    }
+  }
+}

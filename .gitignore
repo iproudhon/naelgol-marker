@@ -13,3 +13,7 @@ Sessions/
 *.wav
 .env
 secrets.json
+
+# The Xcode project IS tracked; only per-user state is not.
+Apps/**/xcuserdata/
+Apps/**/*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist

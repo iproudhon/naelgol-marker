@@ -36,7 +36,7 @@ let package = Package(
         .target(name: "GolfCaptureCore", dependencies: ["GolfSessionFormat"]),
 
         // Capture — motion + barometric altitude. iOS-only (#if os(iOS) inside).
-        .target(name: "GolfCaptureMotion", dependencies: ["GolfSessionFormat"]),
+        .target(name: "GolfCaptureMotion", dependencies: ["GolfSessionFormat", "GolfCaptureCore"]),
 
         // ASR + diarization behind one protocol. Apple path is @available(iOS 26, macOS 26).
         .target(name: "GolfTranscription", dependencies: ["GolfSessionFormat"]),
@@ -45,10 +45,11 @@ let package = Package(
         .target(name: "AnthropicClient"),
 
         // Evidence bundle -> Claude -> structured round + self-verification.
+        // NO `resources:` here on purpose. Declaring them generates Bundle.module,
+        // and prompt/schema must resolve from --prompt/--schema PATHS so tuning is
+        // edit-and-rerun instead of rebuild-per-edit. See CLAUDE.md.
         .target(name: "GolfReconstruction",
-                dependencies: ["GolfSessionFormat", "AnthropicClient"],
-                resources: [.copy("../../Resources/prompt.md"),
-                            .copy("../../Resources/round.schema.json")]),
+                dependencies: ["GolfSessionFormat", "AnthropicClient"]),
 
         // Persistence: rounds, holes, shots, players, courses.
         .target(name: "GolfStore", dependencies: ["GolfSessionFormat"]),
@@ -63,9 +64,12 @@ let package = Package(
         .target(name: "GolfEval", dependencies: ["GolfSessionFormat", "GolfReconstruction"]),
 
         .executableTarget(name: "golfctl",
-                          dependencies: ["GolfSessionFormat", "GolfTranscription",
-                                         "GolfReconstruction", "GolfEval"]),
+                          dependencies: ["GolfSessionFormat", "GolfCaptureCore",
+                                         "GolfTranscription", "GolfReconstruction",
+                                         "GolfEval"]),
 
-        .testTarget(name: "MarkerTests", dependencies: ["GolfSessionFormat", "GolfReconstruction"]),
+        .testTarget(name: "MarkerTests",
+                    dependencies: ["GolfSessionFormat", "GolfCaptureCore",
+                                   "GolfReconstruction"]),
     ]
 )

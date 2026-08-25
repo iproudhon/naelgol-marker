@@ -17,7 +17,7 @@ The research doc ordered risks for a *shipping* app. A PoC reorders them:
 |---|---|
 | **G3** — `UIBackgroundModes: audio` on a record-only app is a Guideline 2.5.4 rejection | **Out of scope.** A development / TestFlight build never faces review. Continuous 4.5-hour capture can be tested for real. |
 | **§7 API key** — can't ship a key in a binary; BYO-key vs proxy backend | **Deferred entirely.** A dev-only build can embed a key it never distributes. Decide BYO-vs-proxy after the PoC proves the idea. |
-| **iOS 17 floor** (vipl's constraint from the swing doc) | **Gone.** Target **iOS 26** with no fallback — `SpeechAnalyzer`, `SpeechTranscriber`, `SpeechDetector`, and native diarization all available day one. |
+| **iOS 17 floor** (vipl's constraint, from its swing research) | **Gone.** Target **iOS 26** with no fallback — `SpeechAnalyzer`, `SpeechTranscriber`, `SpeechDetector`, and native diarization all available day one. |
 | **Battery** (§5 duty cycling, Q1/Q9) | **Not a PoC concern.** Carry a battery pack. Optimisation is a production problem; correctness is the PoC's problem. |
 | **Q12a — far-field capture** | **Still the #1 risk. Unchanged, and now first in line.** |
 

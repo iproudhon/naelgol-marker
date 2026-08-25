@@ -11,14 +11,24 @@ you can walk back through, and a basis for suggesting the next shot.
 
 ## Status
 
-Pre-alpha. Nothing works yet. See [`docs/PLAN.md`](docs/PLAN.md).
+Pre-alpha. **Phase 1 (capture) works**: a round records to a session folder — segmented
+audio, GPS, motion, barometric elevation, and MARKs — and reads back on a Mac. Nothing
+reconstructs yet. See [`docs/PLAN.md`](docs/PLAN.md).
+
+```sh
+swift run golfctl record --out Sessions --players steve,dave --course "Naelgol CC"
+swift run golfctl inspect Sessions/session-2026-08-24-1430
+```
+
+The iOS app is `Apps/Naelgol Marker/` — it builds; see its
+[`SETUP.md`](Apps/Naelgol%20Marker/SETUP.md) for running it on a device.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `Sources/` | Swift package targets — see [`docs/PLAN.md`](docs/PLAN.md) §3 |
-| `Apps/` | Thin iOS app shell over the capture libraries |
+| `Apps/Naelgol Marker/` | iOS app shell over the capture libraries — see its `SETUP.md` |
 | `Resources/` | Default reconstruction prompt and output schema |
 | `docs/` | Plan and the research that produced it |
 

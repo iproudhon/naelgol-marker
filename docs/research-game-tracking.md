@@ -1,22 +1,46 @@
-# vipl — Research: Round / Game Tracking
+# Marker — Research: Round / Game Tracking
 
-Date: 2026-08-24 · Status: research only, no code changes
-Originally written for the `vipl` swing-analysis app; its companion swing-analysis doc (`research-2026-08-body-club-3d.md`) stays in that repo. References to "the companion doc", `§A4/R2`, and vipl file paths point there.
-**Build plan:** §7 is being pursued as a standalone proof-of-concept — see [`poc-plan-round-reconstruction.md`](./poc-plan-round-reconstruction.md). Cross-references below use §-numbers from that document.
-
----
-
-## 0. Why this belongs in vipl rather than a separate app
-
-The app already stamps CoreLocation into `.mov`/`.moz` metadata (`AVAsset.setMetadata(fileURL:description:location:)`, called from `onStopRecording`). So a swing video captured during a round already carries the two keys — **timestamp and coordinate** — needed to join it to a round timeline for free.
-
-That makes the deliverable specific and differentiated: **a shot-by-shot round reconstruction in which some shots have a swing video attached, already pose-analysed.** Arccos and Shot Scope reconstruct rounds; neither hands you the swing. That join is the whole argument for building this here, and it should shape the data model from day one.
+Date: 2026-08-24 · Status: research only · Adapted for the `marker` repo 2026-08-24
+**Build plan:** §7 is being pursued as this repo's proof-of-concept — see
+[`poc-plan-round-reconstruction.md`](./poc-plan-round-reconstruction.md) and
+[`PLAN.md`](./PLAN.md). Cross-references below use §-numbers from those documents.
 
 ---
 
-## 1. Baseline — what exists today
+## 0. Why this is a standalone app
 
-| Area | State | Where |
+*This section replaces the original "why this belongs in vipl" argument. The research was written
+inside the `vipl` swing-analysis app; the decision that followed it was to build round tracking as
+its own app and its own Swift package, with vipl integration as a later join rather than a
+dependency. See [`PLAN.md`](./PLAN.md) §8.*
+
+Round tracking and swing analysis share almost no runtime: one is a 4.5-hour background
+audio + GPS + barometer session, the other a 240 fps foreground camera capture. Their only real
+overlap is a **timestamp and a coordinate** — which is exactly the pair needed to join them *after
+the fact*. vipl already stamps CoreLocation into `.mov`/`.moz` metadata
+(`AVAsset.setMetadata(fileURL:description:location:)`, from `onStopRecording`), so a swing video
+recorded during a round can be attached to a reconstructed shot by timestamp and location alone.
+
+That join is still the differentiated deliverable — **a shot-by-shot round reconstruction in which
+some shots have a swing video attached, already pose-analysed.** Arccos and Shot Scope reconstruct
+rounds; neither hands you the swing. But it is an *integration*, not a reason to live in one
+codebase, and neither project blocks the other. The data model should keep room for it from day
+one: a shot carries an optional external-media reference keyed by time + coordinate.
+
+**Where the swing-analysis research lives:** `~/src/vipl/docs/research-2026-08-body-club-3d.md`,
+in the vipl repo. The sections referenced below (`§A4`, `R1`, `R2`, `§5`) are summarised inline
+where they matter, so nothing in this document depends on reading it.
+
+---
+
+## 1. Baseline — what a swing-capture app already had
+
+*Reference only. This table describes the **vipl** codebase as of 2026-08-24, not this repo, which
+starts from nothing. It is kept because it is the honest starting inventory for the same problem on
+iOS — what a camera-first golf app does and does not already provide — and because the §2
+constraints below were derived from it. File paths are vipl's.*
+
+| Area | State | Where (in `vipl`) |
 |---|---|---|
 | Location | `CLLocationManager`, `kCLLocationAccuracyBest`, `startUpdatingLocation` + `startUpdatingHeading`, started in `viewWillAppear` / stopped in `viewWillDisappear` | `CaptureViewController.swift:222–246` |
 | Location authorization | `requestWhenInUseAuthorization()` only | `CaptureViewController.swift:152–153` |
@@ -27,18 +51,22 @@ That makes the deliverable specific and differentiated: **a shot-by-shot round r
 | "Tags" | One free-text string per asset, stored in AVAsset metadata, edited via an alert box | `PlayerViewController.editTags()` |
 | Persistence | No database. Derived data lives in an in-memory `Cache`; files are flat in the Documents directory, named `swing-NNNN.mov`/`.moz` | `Cache.swift`, `FileSystemHelper.swift` |
 
-**Nothing here survives backgrounding, and nothing here is a round.** There is no concept of a player, a hole, a shot, a score, or a session.
+**Nothing there survives backgrounding, and nothing there is a round.** There was no concept of a player, a hole, a shot, a score, or a session — and `marker` has to build all of it.
 
 ---
 
 ## 2. Hard constraints — read these first
 
-### G1 — The app has no background execution capability whatsoever
+*G2–G7 are iOS platform rules and apply to any app. G1 was an observation about vipl's project
+configuration; for `marker` it reads as **the checklist the app shell must satisfy from day one**,
+since a new target starts with none of these either.*
 
-- **No `UIBackgroundModes` key exists** — not in `Info.plist`, not as an `INFOPLIST_KEY_*` in `project.pbxproj`. The moment the screen locks or the phone goes in a pocket, everything stops.
-- **`NSLocationWhenInUseUsageDescription` only.** No `NSLocationAlwaysAndWhenInUseUsageDescription`, no `allowsBackgroundLocationUpdates`.
-- **No `NSSpeechRecognitionUsageDescription`** at all.
-- **All four existing privacy strings are literally `"<TBD>"`** (`project.pbxproj:907–910`). That is an automatic App Review rejection today, independent of this feature. Fix regardless of what else gets built.
+### G1 — Background execution has to be configured deliberately; nothing is on by default
+
+- **`UIBackgroundModes` must be declared** (`location`, and `audio` only under the G3 caveat below) — as an `INFOPLIST_KEY_*` for an SPM/Xcode target or in `Info.plist`. Without it, the moment the screen locks or the phone goes in a pocket, everything stops. *(vipl declares none of these: no `UIBackgroundModes` key in `Info.plist` or `project.pbxproj`.)*
+- **`NSLocationAlwaysAndWhenInUseUsageDescription`** is required, not just `...WhenInUse`, together with `allowsBackgroundLocationUpdates` (or, at the iOS 17 floor, `CLBackgroundActivitySession` — §5).
+- **`NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`** are both required for the audio path.
+- **Write real privacy strings.** Placeholder text is an automatic App Review rejection. *(vipl ships all four as literally `"<TBD>"`, `project.pbxproj:907–910` — a rejection waiting to happen there, independent of this feature.)*
 
 ### G2 — iOS will not let an app *start* recording audio from the background
 
@@ -91,7 +119,7 @@ Tiers 0 and 1 do almost nothing *here* — the user is standing still holding th
 |---|---|---|---|
 | **0** | `CMMotionActivityManager` — walking → stationary transition | Motion coprocessor; effectively free | **The best lever available.** On a course, "stopped walking" is a near-perfect shot proxy. `CMPedometer` also gives walked distance free, which fills GPS gaps in §5. |
 | **1** | Geofence / significant-location-change | OS-handled, low power | Round start/stop, coarse hole transitions **only** (G4) |
-| **2** | VAD / impact transient on an `AVAudioEngine` tap | Cheap DSP | Speech present? Ball struck? — **the same impact-transient detector as §A4/R2 in the swing doc; build it once** |
+| **2** | VAD / impact transient on an `AVAudioEngine` tap | Cheap DSP | Speech present? Ball struck? — **the impact transient is the shot anchor** — see the R2 note below |
 | **3** | ASR burst | Expensive | Only after a Tier 0–2 trigger, seconds at a time |
 
 ### Which speech API — and the deployment-target fork
@@ -99,13 +127,15 @@ Tiers 0 and 1 do almost nothing *here* — the user is standing still holding th
 - **iOS 26+: `SpeechAnalyzer` / `SpeechTranscriber`** (WWDC25). Purpose-built for long-form, low-latency, fully on-device transcription, and it **removes the ~1-minute session cap** that makes `SFSpeechRecognizer` painful. It also ships a **`SpeechDetector` module for voice-activity detection** — i.e. Tier 2 above is a first-party component, not something to hand-roll.
 - **iOS 17–25: `SFSpeechRecognizer`** with `requiresOnDeviceRecognition = true`, plus `contextualStrings` to bias toward club names and player names. Expect to manage the ~1-minute cap with a restart loop.
 
-> **Name the fork explicitly.** The swing doc recommends moving the deployment target to **iOS 17** (for `VNDetectHumanBodyPose3DRequest`). The best speech API wants **iOS 26**. These are different floors. Either ship `SFSpeechRecognizer` at 17 and adopt `SpeechAnalyzer` behind an availability check, or accept a much narrower device base. The availability-check route is clearly right; just don't let it be an accident.
+> **Name the fork explicitly.** Background location capture needs **iOS 17** (§5), and vipl's swing research independently lands on the same floor (for `VNDetectHumanBodyPose3DRequest`). The best speech API wants **iOS 26**. These are different floors. Either ship `SFSpeechRecognizer` at 17 and adopt `SpeechAnalyzer` behind an availability check, or accept a much narrower device base. The availability-check route is clearly right; just don't let it be an accident.
 
 ### No *continuous* audio capture — and be honest about the audio that already exists
 
 For the ASR path: transcribe and discard the buffers. That is simultaneously the storage answer (4.5 h of audio is large), the battery answer (no encode, no write), and part of the privacy answer.
 
-But **the app already writes audio to disk today.** `AVCaptureAudioDataOutput` puts an audio track into every swing `.mov` (`CaptureViewController.swift:52`; `audioSettings` passed unconditionally to `movieOut?.start`), and the companion doc's §A4/R2 *wants* that audio for the impact transient. So swing clips recorded during a round already contain whatever a foursome was saying. See §8 — that file, not the ASR path, is where the consent exposure actually lives.
+But **a swing-capture app already writes audio to disk.** In vipl, `AVCaptureAudioDataOutput` puts an audio track into every swing `.mov` (`CaptureViewController.swift:52`; `audioSettings` passed unconditionally to `movieOut?.start`), and its swing research wants that audio for the impact transient. So swing clips recorded during a round already contain whatever a foursome was saying. See §8 — in a combined setup that file, not the ASR path, is where the consent exposure actually lives. *(This applies to vipl, not to `marker`, which records no video; it is kept because the two apps will be used on the same course on the same day.)*
+
+> **The R2 impact anchor, summarised.** From the vipl swing research (`§A4`): don't track the ball, notice that it *left*. A golf ball at address is a static ~18 px disc at a known location; ROI frame-differencing over a small window around that location gives a frame-accurate impact timestamp with no model and no training data (R2), and the same vanish test identifies the ball at address in the first place (R1). The audio counterpart — an impact transient on an `AVAudioEngine` tap — is the version `marker` can use, since it needs no camera; it costs a ~10 ms speed-of-sound correction and is still an open question in that doc (does impact sound locate the frame reliably enough to cross-check R2?). **For `marker`, this is the cheapest candidate shot-event trigger and the GPS duty-cycle wake signal — but it is unvalidated, and the LLM reconstruction does not depend on it.**
 
 ---
 
@@ -124,7 +154,7 @@ A shot is a **stationary → displacement → stationary** transition. GPS alone
 1. `CMMotionActivity` gives the walk/stationary segmentation almost free (Tier 0).
 2. GPS fixes at segment boundaries give shot start and end positions → **shot distance**.
 3. `CMPedometer` distance bridges GPS dropouts and sanity-checks segment lengths.
-4. The swing-detection work already scoped in the companion doc (or an Apple Watch IMU) disambiguates real swings from practice swings.
+4. Swing detection (the vipl swing research's R2 impact anchor, an audio impact transient, or an Apple Watch IMU) disambiguates real swings from practice swings.
 
 **Location strategy — accuracy tiers, duty cycling, background sessions, auto-pause — is entirely in §5.** It is the single source; do not duplicate it here.
 
@@ -181,7 +211,7 @@ Exactly the same shape as G2 (audio): **a new `CLBackgroundActivitySession` can 
 
 Consequence: **the round must be explicitly started by the user while the app is open.** That is a fine UX for golf — a golfer taps "start round" on the first tee — but it forecloses fully automatic round detection from a cold start, and it makes mid-round session loss unrecoverable without user action (see *Resilience* below).
 
-This is the iOS 17+ API set: `CLLocationUpdate.liveUpdates()` for the stream, `CLBackgroundActivitySession` for background entitlement, `CLMonitor` for geofences. It aligns with the iOS 17 floor the companion doc already proposes.
+This is the iOS 17+ API set: `CLLocationUpdate.liveUpdates()` for the stream, `CLBackgroundActivitySession` for background entitlement, `CLMonitor` for geofences. It sets this project's iOS 17 floor for capture — the same floor the vipl swing research independently arrives at (it needs `VNDetectHumanBodyPose3DRequest`), so a shared package stays possible. See [`PLAN.md`](./PLAN.md) §4 for how that floor is declared.
 
 ### Recommended architecture — motion-gated GPS duty cycling
 
@@ -197,7 +227,7 @@ This is the iOS 17+ API set: `CLLocationUpdate.liveUpdates()` for the stream, `C
       └─ walking resumes              → GPS down
 ```
 
-**The pre-shot routine is a free GPS warm-up window.** This is what makes duty cycling viable rather than a latency trap. Cold/warm TTFF is the usual objection to cycling GPS off — but the golfer stops walking 15–45 seconds *before* the ball leaves. Bring the receiver up the instant `CMMotionActivity` reports stationary, and by the moment that actually needs a position (impact, from the companion doc's §A4/R2 detector) the fix has converged. The user's own routine hides the TTFF.
+**The pre-shot routine is a free GPS warm-up window.** This is what makes duty cycling viable rather than a latency trap. Cold/warm TTFF is the usual objection to cycling GPS off — but the golfer stops walking 15–45 seconds *before* the ball leaves. Bring the receiver up the instant `CMMotionActivity` reports stationary, and by the moment that actually needs a position (impact, from an impact-transient detector — see §3) the fix has converged. The user's own routine hides the TTFF.
 
 `CMPedometer` distance between fixes gives a dead-reckoned path for free, which both fills the gaps on the reconstructed map and sanity-checks segment lengths.
 
@@ -393,7 +423,7 @@ An Anthropic key shipped in an iOS binary is extractable. Two options, both real
 | **BYO key** — user pastes their own | No infrastructure | Niche-user-only; awkward onboarding; user sees per-round billing |
 | **Proxy backend** — app calls your server, server holds the key | Servers, auth, ops, and now you are storing users' transcripts | Normal UX; **the app stops being fully local** |
 
-vipl today is 100% on-device with no server. A proxy is a larger architectural commitment than the feature itself, and it changes the product's privacy posture (§8). Decide this **before** building, not after. Note also that **Swift has no official Anthropic SDK** — this is raw HTTPS to `/v1/messages` either way.
+The design goal here, as in vipl, is 100% on-device with no server. A proxy is a larger architectural commitment than the feature itself, and it changes the product's privacy posture (§8). Decide this **before** building, not after. Note also that **Swift has no official Anthropic SDK** — this is raw HTTPS to `/v1/messages` either way.
 
 **3. On-device inference does not rescue you.**
 Apple's Foundation Models on-device `SystemLanguageModel` has a **fixed 4,096-token context window**. A 27K-token round does not remotely fit — this option collapses to aggressive per-hole chunking with far weaker reasoning, on the hardest reasoning task in either document. It is not a peer alternative.
@@ -408,11 +438,11 @@ Nothing here is buildable without ground truth. Record 5–10 real rounds with a
 
 ## 8. Persistence — one decision that must serve both documents
 
-There is no database today. The companion doc's §5 item 3 already asks for a per-swing sidecar (3D pose, phase indices, club track). A round store is the same ask at larger scale, and the two **must not diverge into separate mechanisms**.
+There is no database yet. The vipl swing research (§5 item 3) asks for a per-swing sidecar alongside each `.mov`/`.moz` — 3D pose, phase indices, club track — for the same reason: derived data currently lives only in an in-memory cache and is recomputed on every open. A round store is the same ask at larger scale, and if both ship the two **must not diverge into separate mechanisms**.
 
 New entities: `Player`, `Course`, `Hole`, `Round`, `Shot` (with optional `assetURL` linking to a `.mov`/`.moz`).
 
-**Recommendation: SwiftData**, available at the iOS 17 floor the companion doc already proposes. It handles the relational shape (round → holes → shots), gives migration for free, and can hold the swing sidecar as a related entity rather than a parallel file format. JSON sidecars remain viable if a dependency-free file layout is preferred — but pick one mechanism for both features and record the choice in both documents.
+**Recommendation: SwiftData**, available at the iOS 17 floor capture already requires. It handles the relational shape (round → holes → shots), gives migration for free, and can hold the swing sidecar as a related entity rather than a parallel file format. JSON sidecars remain viable if a dependency-free file layout is preferred — but pick one mechanism for both features and record the choice in both documents.
 
 ---
 
@@ -423,7 +453,7 @@ Recording a foursome is materially different from recording yourself: several US
 Three exposures now:
 
 1. **The ASR path (new).** Mitigated by transcribing and discarding — no raw audio persists, and the session is short and user-initiated.
-2. **Swing clip audio (already shipping).** Every `.mov` carries an audio track today, and §A4/R2 in the companion doc has a reason to keep it (the impact transient). This is the real exposure and "transcribe and discard" does not touch it. **Make an explicit decision:** keep the audio track and disclose it, or run impact detection at capture time and strip the track afterwards, keeping only the detected impact timestamp. The second is strictly better for privacy and storage and costs the impact detector you were building anyway.
+2. **Swing clip audio (vipl, already shipping).** Every vipl `.mov` carries an audio track today, and its swing research has a reason to keep it (the impact transient, R2). This is the real exposure and "transcribe and discard" does not touch it. **Make an explicit decision:** keep the audio track and disclose it, or run impact detection at capture time and strip the track afterwards, keeping only the detected impact timestamp. The second is strictly better for privacy and storage and costs the impact detector you were building anyway.
 3. **§7 reconstruction (the largest, and new).** Capturing a group's conversation for 4.5 hours is a different act from recording your own swing, and it needs **explicit consent from every player at the start of the round** — not a buried setting. This is a group product decision: the golfer who opens the app is not the only person whose voice is captured. Additionally, if reconstruction runs through a proxy backend (§7), transcripts of private conversation leave the device and are stored on your infrastructure — **the app stops being fully local, and you become a data controller.** Keep raw audio on-device and discard it after transcription regardless; consider sending the LLM a *redacted* transcript (golf-relevant utterances only, filtered on-device) rather than everything said over 4.5 hours.
 
 Either way: a clear in-app disclosure and an off switch. One sentence in the UI; do not skip it.

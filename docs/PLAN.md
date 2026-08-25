@@ -31,7 +31,7 @@ metric the whole product lives or dies on.
 
 | # | Pillar | What it is | Depends on |
 |---|---|---|---|
-| **P1** | **Capture & reconstruct** | Record audio + GPS + motion + altitude for a round; reconstruct a shot-by-shot round for all players | The PoC. Gated by Q12a. |
+| **P1** | **Capture, reconstruct, correct** | Record audio + GPS + motion + altitude for a round; reconstruct a shot-by-shot draft for all players; the user amends it | Nothing — no longer gated (§3) |
 | **P2** | **Record & replay** | Past rounds and past holes, persisted; scrub a round back on a timeline | P1 |
 | **P3** | **Map with elevation** | The round on a map, per-hole elevation profile, tee→green delta | Capture only — **independently useful, ships without P1** |
 | **P4** | **Play suggestion** | "From here, on this hole, at this elevation delta — here's what you've done before" | P2 + several rounds of history |
@@ -39,7 +39,7 @@ metric the whole product lives or dies on.
 ### Sequencing consequence
 
 **P3 does not depend on reconstruction.** A map with real elevation is useful the first time you
-walk a hole, and it needs nothing but the capture layer. If P1 fails its kill gate (§3), P3 and a
+walk a hole, and it needs nothing but the capture layer. If reconstruction turns out weak (§3), P3 and a correction-driven
 manual-entry P2 still make a real app. Build P3 early for that reason, not last.
 
 P4 is honest only with history. Cold start is **silence**, not generic advice — every golf app
@@ -48,21 +48,39 @@ hole four times, and here is what happened.
 
 ---
 
-## 3. The gate
+## 3. Capture everything, correct the rest
 
-Everything in P1 sits behind one unanswered question:
+**Decision, 2026-08-24: Phase 0 is no longer a gate.** Far-field capture rate (Q12a) is still worth
+measuring, but not as a stop-the-world precondition. The reasoning that replaces it:
 
-> **Q12a — can a pocketed phone actually hear the other three players?**
-> Three players 5–20 m away, outdoors, in wind. Diarization is moot for an utterance that never
-> reached the microphone.
+> Collect as much as the phone can hear, derive what is derivable, and let the user correct the
+> rest. A reconstruction that gets 70% of the round right and is *editable* is a product. A
+> reconstruction that waits for perfect audio is not.
 
-The test costs a round of golf and zero code — Voice Memos, a paper scorecard, Whisper on a Mac.
-Thresholds are committed **before** the test in
-[`poc-plan-round-reconstruction.md`](./poc-plan-round-reconstruction.md) §3: below 40% non-holder
-utterance capture, the foursome premise is dead and P1 pivots to phone-holder-only or per-player
-devices.
+This changes the shape of P1 rather than its existence:
 
-**Run Phase 0 before writing capture code.** The one exception is P3, which is unaffected.
+- **Reconstruction must be a draft, not an answer.** Output is a proposal the user amends — add a
+  missed shot, fix an attribution, delete a phantom stroke, correct a score.
+- **Corrections are first-class data**, persisted in the session folder alongside the round
+  (`corrections.jsonl`), not a UI-only edit applied to a view model.
+- **Derivation carries the load audio drops.** A shot the microphone missed can still be inferred:
+  GPS discontinuity, a stationary→walking transition after a stationary window, a stroke count that
+  does not reconcile with an announced score. The reconstruction prompt should be told to propose
+  low-confidence shots rather than omit them — a shot the user deletes costs one tap; a shot never
+  proposed is invisible.
+- **Confidence must be visible.** Every shot carries a confidence and the evidence it rests on, so
+  the user knows where to look. This is now part of the output schema, not a nicety.
+
+**Corrections are the eval set.** This is the real upside. Every correction is a free labeled error
+in exactly the format `GolfEval` needs — no paper scorecards, no separate ground-truth collection
+pass. The eval set grows with use instead of with dedicated effort, which is what makes the
+"5–10 real rounds" of Q15 tractable. Consequence: **`Correction` is ground truth and must obey the
+same firewall as `Mark`** — never in an evidence bundle, never in a prompt. See §4.
+
+**Q12a is still worth running**, opportunistically, because the answer changes prompt design
+(how much to lean on derivation) and hardware strategy (per-player devices, an Apple Watch mic).
+Method and thresholds stay in [`poc-plan-round-reconstruction.md`](./poc-plan-round-reconstruction.md) §3.
+It no longer blocks anything.
 
 ---
 
@@ -84,9 +102,17 @@ One Swift package, thin app and CLI shells over it. Nothing interesting lives in
 
 ### Platform floors
 
-SPM declares platforms **once per package**, so `Package.swift` carries the *lowest* floor
-(iOS 16 / macOS 13) and higher-floor APIs are gated with `@available` in source. That is what lets
-a host app on iOS 16/17 import the low-floor libraries at all.
+**Decision, 2026-08-24: the Marker iOS app targets iOS 26.** That is a *deployment target on the
+app*, not the package floor — the two are independent knobs. `Package.swift` keeps the *lowest*
+floor any target needs (iOS 16 / macOS 13), because SPM declares platforms once per package, and
+higher-floor APIs are gated with `@available` in source. Keeping the package low is what preserves
+the "importable module" property: another app (vipl at iOS 16.1/17) can still consume
+`GolfSessionFormat`, `GolfReconstruction`, `AnthropicClient`, and `GolfEval`.
+
+**What iOS 26 buys, and what it retires:** `SpeechAnalyzer` / `SpeechTranscriber` are available
+day one — long-form, on-device, no ~1-minute session cap, with `SpeechDetector` for VAD. **The
+`SFSpeechRecognizer` fallback fork is dead**; do not carry it as a live decision. `GolfTranscription`'s
+Apple path stays `@available(iOS 26, macOS 26)` so the package floor can remain low.
 
 | Target | Effective floor | Note |
 |---|---|---|
@@ -101,9 +127,15 @@ a host app on iOS 16/17 import the low-floor libraries at all.
 
 ### Boundaries enforced in types, not discipline
 
-- **`Mark` (ground truth) is unreachable from `GolfReconstruction`.** Separate type, separate file,
-  and the target does not depend on anything that exposes it. The answer key must be structurally
-  incapable of leaking into the model input.
+- **Ground truth must never reach `GolfReconstruction`.** That is `Mark`, `Scorecard`, **and
+  `Correction`** (§3) — all in `Sources/GolfSessionFormat/Mark.swift`; nothing in
+  `GolfReconstruction` may import or reference them. `Correction` makes this sharper than `Mark`
+  did: marks are a one-off eval aid, corrections accumulate on every round forever, and they are
+  the eval set. **As scaffolded this is a convention enforced by review, not by the compiler** —
+  `GolfReconstruction` depends on `GolfSessionFormat`, which is where `Mark` lives. Making it
+  structural means splitting `Mark`/`Scorecard` into their own target that only `GolfEval` depends
+  on. Worth doing before the eval loop exists; the answer key leaking into the model input would
+  silently invalidate every accuracy number.
 - **`Transcriber` is a protocol**, so the ASR A/B is `golfctl --asr apple|whisperkit`, not a branch.
 - **`AnthropicClient` knows nothing about golf** — model config, messages, JSON schema.
 
@@ -147,8 +179,8 @@ golfer actually wants, and it is the smallest genuinely useful thing Marker can 
 
 | Phase | Work | Gate |
 |---|---|---|
-| **0** | Far-field capture test — **no code** | <40% non-holder capture → P1 pivots |
-| **1** | `GolfSessionFormat` + `GolfCaptureCore` + `GolfCaptureMotion` + iOS shell (MARK button first) | Session folder round-trips device→Mac |
+| **0** | Far-field capture measurement — **no code, no longer a gate** (§3) | Informs prompt + hardware strategy; blocks nothing |
+| **1** | `GolfSessionFormat` writers + `GolfCaptureCore` + `GolfCaptureMotion` + iOS 26 app shell (MARK button first) | **Session folder round-trips device→Mac** |
 | **2** | `GolfTranscription` — Apple vs WhisperKit+SpeakerKit A/B | No usable speaker clusters → reassess P1 |
 | **3** | `AnthropicClient` + `GolfReconstruction` | — |
 | **4** | `GolfEval`, built alongside 3 | **Attribution accuracy decides P1 go/no-go** |
@@ -156,8 +188,15 @@ golfer actually wants, and it is the smallest genuinely useful thing Marker can 
 | **6** | `GolfMap` — map + elevation profile + replay scrubber (**P3**) | Can start any time after Phase 1 |
 | **7** | `GolfInsight` — suggestion from history (**P4**) | Needs ≥5 rounds of one player's history |
 
-~2.5 weeks of coding for Phases 0–4; **data collection is the schedule driver**, so start
-recording rounds during Phase 1.
+~2.5 weeks of coding for Phases 1–4; **data collection is the schedule driver**, so start
+recording rounds the moment Phase 1's app installs — imperfect captures are still training data,
+and every one you correct is an eval row (§3).
+
+**Phase 1 order — the phone comes last.** `GolfCaptureCore` is cross-platform on purpose, so the
+capture pipeline is developed and tested on a Mac via `golfctl record` before an app target exists:
+(1) `SessionFolder` JSONL writer/reader with real tests, (2) `AudioRecorder` / `LocationRecorder` /
+`RoundSession`, (3) `GolfCaptureMotion` (iOS-only), (4) the Xcode app shell over the top. The gate
+— a session folder that round-trips — is reachable at step 2 without a device.
 
 ---
 
@@ -165,7 +204,7 @@ recording rounds during Phase 1.
 
 Carried from [`research-game-tracking.md`](./research-game-tracking.md) §10, in priority order:
 
-1. **Q12a** far-field capture rate per non-holder player — gates P1 (§3).
+1. **Q12a** far-field capture rate per non-holder player — **no longer a gate** (§3); shapes how hard the prompt leans on derivation, and whether per-player devices or a Watch mic are worth it.
 2. **Q12** does iOS 26 `SpeechTranscriber` actually diarize, or is SpeakerKit the only path?
 3. **Q15** reconstruction accuracy on 5–10 real rounds, split by metric; attribution is decisive.
 4. **Q14** is Private Cloud Compute developer-accessible, and does its 32K context hold? Would

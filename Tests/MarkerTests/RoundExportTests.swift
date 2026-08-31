@@ -6,7 +6,7 @@ import XCTest
 final class RoundExportTests: XCTestCase {
 
     private let start: Millis = 1_700_000_000_000
-    private var roster: [Player] { [Player(id: "steve", name: "Steve", aliases: ["스티브"])] }
+    private var roster: [Player] { [Player(id: "steve", name: "Steve")] }
 
     private func sampleLog() -> LogEntry {
         LogEntry(id: "L1", t: start + 124_000, text: "7: 2 drive into the left bunker",

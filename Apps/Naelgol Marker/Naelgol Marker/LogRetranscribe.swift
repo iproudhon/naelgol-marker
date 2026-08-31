@@ -36,14 +36,26 @@ final class LogRetranscribe: ObservableObject {
 
     /// The recorded audio behind a log, if any is readable yet.
     ///
-    /// Empty means one of three things and the UI says which: the log was typed,
-    /// it predates `LogEntry.tEnd`, or — the common one — it was spoken into the
-    /// burst that is **still recording**. An `.m4a` still being written cannot be
-    /// opened at all, so the answer is "not until you stop", not an error.
+    /// Empty means one of four things and the UI says which: the log was typed,
+    /// it predates `LogEntry.tEnd`, it was spoken into the burst that is **still
+    /// recording** (an `.m4a` still being written cannot be opened at all, so the
+    /// answer is "not until you stop", not an error) — or the round was **imported**
+    /// and carries its audio index without the recordings.
+    ///
+    /// **The file check is that fourth case, and it is not belt-and-braces.**
+    /// `AudioSpans.resolve` matches a log's times against `audio.jsonl` rows and
+    /// knows nothing about the filesystem, and `hasAudioSpan` is `tEnd != nil` — a
+    /// pure field test. An imported round satisfies both for every spoken log,
+    /// because the index is carried deliberately: it is the round's clock. Without
+    /// this filter "Transcribe again" would be offered on every row of such a round
+    /// and fail on each, which reads as the feature being broken rather than as the
+    /// recordings not having travelled.
     nonisolated static func spans(for log: LogEntry, in folder: SessionFolder) -> [AudioSpan] {
         guard log.hasAudioSpan, let end = log.tEnd else { return [] }
+        let fm = FileManager.default
         return AudioSpans.resolve(from: log.t, to: end,
                                   in: folder.readAll(.audio, as: AudioSegment.self))
+            .filter { fm.fileExists(atPath: folder.audioPath(index: $0.segment.index).path) }
     }
 
     func run(_ log: LogEntry, in folder: SessionFolder, model: String, players: [Player]) async {

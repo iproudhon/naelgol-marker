@@ -142,6 +142,26 @@ public struct SessionFolder: Sendable {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
+    /// A folder name inside `root` that nothing is using — `name`, or `name-2`,
+    /// `name-3`…
+    ///
+    /// **One copy, because three callers now need it and they must agree.** A round
+    /// is imported into a folder named from its start time, a deleted round is moved
+    /// into the trash, and a trashed one is moved back — and every one of those can
+    /// collide with a folder that appeared meanwhile. Three private uniquifiers
+    /// would be three chances for one of them to overwrite instead of suffix, on the
+    /// one operation where overwriting destroys a whole round.
+    public static func freeName(_ name: String, in root: URL) -> String {
+        let fm = FileManager.default
+        var candidate = name
+        var n = 2
+        while fm.fileExists(atPath: root.appendingPathComponent(candidate).path) {
+            candidate = "\(name)-\(n)"
+            n += 1
+        }
+        return candidate
+    }
+
     /// Conventional folder name for a session starting at `start`, in local time.
     /// Local rather than UTC on purpose: a golfer looking for "the Sunday morning
     /// round" should find it by name.

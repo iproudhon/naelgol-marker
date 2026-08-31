@@ -20,7 +20,7 @@ final class RoundSessionTests: XCTestCase {
 
     func testRoundRoundTripsThroughTheFolder() throws {
         let session = RoundSession.create(under: root,
-                                          players: [Player(name: "steve", aliases: ["스티브"]), Player(name: "dave")],
+                                          players: [Player(name: "steve"), Player(name: "dave")],
                                           course: "Naelgol CC",
                                           recordAudio: false, recordLocation: false)
         try session.start()
@@ -37,7 +37,6 @@ final class RoundSessionTests: XCTestCase {
         let folder = SessionFolder(url: session.folder.url)
         let meta = try folder.readMeta()
         XCTAssertEqual(meta.players.map(\.name), ["steve", "dave"])
-        XCTAssertEqual(meta.players[0].aliases, ["스티브"])
         XCTAssertEqual(meta.course, "Naelgol CC")
         XCTAssertNotNil(meta.end, "stop() must close meta.json")
         XCTAssertGreaterThanOrEqual(meta.end!, meta.start)

@@ -327,15 +327,14 @@ final class RoundDocument: ObservableObject {
                             prevTee: state.tees[player]?.name))
     }
 
-    func addPlayer(name: String, aliases: [String] = []) {
+    func addPlayer(name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        record(JournalEntry(act: .addPlayer, player: trimmed, name: trimmed,
-                            aliases: aliases))
+        record(JournalEntry(act: .addPlayer, player: trimmed, name: trimmed))
     }
 
-    func editPlayer(id: String, name: String?, aliases: [String]?) {
-        record(JournalEntry(act: .editPlayer, player: id, name: name, aliases: aliases))
+    func editPlayer(id: String, name: String?) {
+        record(JournalEntry(act: .editPlayer, player: id, name: name))
     }
 
     func removePlayer(id: String) {

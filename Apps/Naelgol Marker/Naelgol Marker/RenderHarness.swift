@@ -27,7 +27,8 @@ enum DemoSeed {
         let v = UserDefaults.standard.integer(forKey: "marker.hole")
         return v > 0 ? v : nil
     }
-    /// Which sheet to open on the round screen: `history`, `card`, `detail`.
+    /// Which sheet to open on the round screen: `history`, `roster`, `detail`,
+    /// `marker`, `export`.
     ///
     /// **Scripted taps do not exist in this environment**, so a sheet that is only
     /// reachable through a menu is a sheet nobody can look at before it ships.
@@ -35,6 +36,81 @@ enum DemoSeed {
     static var openSheet: String? {
         let v = UserDefaults.standard.string(forKey: "marker.sheet")
         return (v?.isEmpty == false) ? v : nil
+    }
+
+    /// Open the round importer on the rounds list, optionally with an export
+    /// already in the box: `-marker.import YES -marker.import.file /path/to/round.txt`.
+    ///
+    /// Both halves are needed for the same reason `marker.find.query` is. The sheet
+    /// lives behind a menu on the first screen, so without the flag it cannot be
+    /// looked at at all; and an *empty* importer shows none of what the feature is
+    /// actually for — the decoded summary, the ground-truth line, the warning that
+    /// the recordings did not travel. Those only appear once something has been
+    /// pasted, and there is no way to paste here.
+    static var wantsImport: Bool { UserDefaults.standard.bool(forKey: "marker.import") }
+
+    /// Renders the export sheet with **terrain switched off** —
+    /// `-marker.sheet export -marker.export.terrain no`.
+    ///
+    /// Same argument as every other key here: it is a `Toggle`, and a toggle is
+    /// flipped by a finger. Without this only the on state can ever be looked at,
+    /// and the off state is the one that changes three rows at once — the summary
+    /// says "terrain left out", the size collapses, and the wire form usually flips
+    /// from compressed to readable JSON because terrain was most of the bytes.
+    static var exportIncludesTerrain: Bool {
+        UserDefaults.standard.string(forKey: "marker.export.terrain").map {
+            !["no", "NO", "0", "off"].contains($0)
+        } ?? true
+    }
+
+    /// Pushes straight to the New round setup screen — `-marker.new YES`.
+    ///
+    /// It is reached by tapping `+` on the rounds list, and scripted taps do not
+    /// exist here. Without it the roster fields could not be looked at at all —
+    /// which is exactly what changed on 2026-08-31, when the alias row went and the
+    /// remembered roster went with it.
+    static var wantsNewRound: Bool { UserDefaults.standard.bool(forKey: "marker.new") }
+
+    /// Opens one player's own screen inside the roster sheet —
+    /// `-marker.sheet roster -marker.player steve`.
+    ///
+    /// `PlayerEditor` sits behind a `NavigationLink` in that sheet, so `marker.sheet
+    /// roster` gets one tap short of it. Same argument as `marker.new`: without this
+    /// the screen that holds the name field, the index and the tee picker could not
+    /// be looked at at all.
+    static var openPlayer: String? {
+        let v = UserDefaults.standard.string(forKey: "marker.player")
+        return (v?.isEmpty == false) ? v : nil
+    }
+
+    /// Move a seeded round into the trash on launch, so "Recently deleted" can be
+    /// looked at: `-marker.trash YES`.
+    ///
+    /// The section is drawn only when the trash has something in it, and the only
+    /// way to put something there is to swipe a row and confirm a dialog — two taps
+    /// that do not exist in this environment. Without this the section, its expiry
+    /// line, its footer and its Empty button would all ship unlooked-at.
+    /// `-marker.trash YES` seeds one, `-marker.trash confirm` opens the delete
+    /// confirmation instead.
+    static var trashMode: String? {
+        let v = UserDefaults.standard.string(forKey: "marker.trash")
+        return (v?.isEmpty == false) ? v : nil
+    }
+
+    /// The file named by `marker.import.file`, opened as though it had been picked
+    /// out of the file importer. Nil when the key is absent.
+    ///
+    /// **It goes down the file road, not the paste road**, because the picker itself
+    /// is a system sheet nothing here can drive: this is the only way the read, the
+    /// "From <file>" row and the unreadable-file message get looked at before they
+    /// ship. It does *not* prove the security-scoped call — a plain path in the
+    /// simulator is already inside the sandbox — so that half stays unverified.
+    /// A path that does not exist is left to the ordinary failure message rather
+    /// than checked for, since that message is a thing worth seeing.
+    static var importFile: URL? {
+        guard let path = UserDefaults.standard.string(forKey: "marker.import.file"),
+              !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     /// Start a round on launch and open it, so the recording controls can be
@@ -195,7 +271,7 @@ enum DemoSeed {
                              course: String, events: Int, logs: Int) {
         let folder = SessionFolder(url: RoundViewModel.sessionsRoot.appendingPathComponent(name))
         try? folder.create()
-        let players = [Player(name: "steve", aliases: ["스티브", "형"]),
+        let players = [Player(name: "steve"),
                        Player(name: "dave"), Player(name: "min")]
         try? folder.writeMeta(SessionMeta(
             sessionID: name, course: course, players: players,

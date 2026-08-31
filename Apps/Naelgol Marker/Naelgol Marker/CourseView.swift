@@ -30,7 +30,12 @@ final class CourseLibrary: ObservableObject {
         }
     }
 
-    private let store = CourseStore.documents
+    /// **Not private**, because the round importer writes courses through it and
+    /// must go through *this* store rather than making its own: a second
+    /// `CourseStore.documents` would write the same files behind this object's
+    /// back, so `courses` and `terrain` would keep describing what was on disk
+    /// before the import.
+    let store = CourseStore.documents
 
     init() {
         selectedID = UserDefaults.standard.string(forKey: "marker.course")
@@ -68,9 +73,24 @@ final class CourseLibrary: ObservableObject {
         if id == selectedID { terrain = grid; terrainID = id }
     }
 
+    /// Any course's terrain, read from disk on demand — for the exporter, which
+    /// needs the round's course rather than the selected one. `terrain` above stays
+    /// the cached grid for whatever is on screen.
+    func elevation(for id: String) -> Elevation? { store.loadElevation(id: id) }
+
     /// Reads the sidecar when the selected course changes, and not otherwise.
-    func loadTerrain() {
-        guard terrainID != selectedID else { return }
+    ///
+    /// **`force` is for a sidecar that appeared under a course that did not
+    /// change.** The id guard exists because `reload()` runs on every appearance of
+    /// the hole view and re-reading three quarters of a megabyte each time buys
+    /// nothing — but it assumes the only way terrain changes is that the *course*
+    /// changed. A round import breaks that assumption: it can add a `.dem` to a
+    /// course already on disk and already selected, so `terrainID == selectedID`,
+    /// the guard returns early, and the plays-like number stays missing until the
+    /// next relaunch. That is the same silent-vanishing failure the `selectedID`
+    /// observer above was written for, arriving by the one road it cannot see.
+    func loadTerrain(force: Bool = false) {
+        guard force || terrainID != selectedID else { return }
         terrainID = selectedID
         terrain = selectedID.flatMap { store.loadElevation(id: $0) }
     }

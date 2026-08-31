@@ -16,6 +16,7 @@
 		MK0000000000000000026 /* GolfTranscription in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000016 /* GolfTranscription */; };
 		MK0000000000000000027 /* GolfCourseOSM in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000017 /* GolfCourseOSM */; };
 		MK0000000000000000028 /* GolfTerrain in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000018 /* GolfTerrain */; };
+		MK0000000000000000029 /* GolfExchange in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000019 /* GolfExchange */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +42,7 @@
 				MK0000000000000000023 /* GolfCourse in Frameworks */,
 				MK0000000000000000027 /* GolfCourseOSM in Frameworks */,
 				MK0000000000000000028 /* GolfTerrain in Frameworks */,
+				MK0000000000000000029 /* GolfExchange in Frameworks */,
 				MK0000000000000000024 /* GolfMap in Frameworks */,
 				MK0000000000000000025 /* GolfReconstruction in Frameworks */,
 				MK0000000000000000026 /* GolfTranscription in Frameworks */,
@@ -92,6 +94,7 @@
 				MK0000000000000000013 /* GolfCourse */,
 				MK0000000000000000017 /* GolfCourseOSM */,
 				MK0000000000000000018 /* GolfTerrain */,
+				MK0000000000000000019 /* GolfExchange */,
 				MK0000000000000000014 /* GolfMap */,
 				MK0000000000000000015 /* GolfReconstruction */,
 				MK0000000000000000016 /* GolfTranscription */,
@@ -423,6 +426,10 @@
 		MK0000000000000000018 /* GolfTerrain */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GolfTerrain;
+		};
+		MK0000000000000000019 /* GolfExchange */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfExchange;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

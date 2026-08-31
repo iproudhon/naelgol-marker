@@ -26,18 +26,9 @@ struct NewRoundView: View {
         Form {
             Section {
                 ForEach($model.drafts) { $draft in
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextField("Name", text: $draft.name)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .font(.body.weight(.medium))
-                        TextField("also called: 스티브, 형", text: $draft.aliasText)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
+                    TextField("Name", text: $draft.name)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                 }
                 .onDelete { model.removePlayers(at: $0) }
 
@@ -49,9 +40,12 @@ struct NewRoundView: View {
             } header: {
                 Text("Players")
             } footer: {
-                Text("Put every name the group actually says out loud in \"also called\" — "
-                   + "nicknames, Korean given names, 형/누나. Attribution matches on spoken "
-                   + "names, so a player called only by a nickname is still attributable.")
+                // **One empty row, every time**, and no remembered roster — see
+                // `RoundViewModel.drafts`. The footer says what to type rather
+                // than what the field is, because on a fresh screen the field is
+                // blank and unlabelled apart from its placeholder.
+                Text("The name each player is called on the card. Whoever is playing can "
+                   + "be added or removed later without losing anyone's scores.")
             }
 
             Section {

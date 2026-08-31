@@ -16,6 +16,7 @@ struct MarkerApp: App {
     private let initialPath: [RoundsListView.Route] = {
         #if DEBUG
         DemoSeed.seedIfRequested()
+        if DemoSeed.wantsNewRound { return [.newRound] }
         return DemoSeed.openRound.map { [RoundsListView.Route.round($0)] } ?? []
         #else
         return []

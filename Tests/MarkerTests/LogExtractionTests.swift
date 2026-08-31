@@ -32,7 +32,7 @@ final class LogExtractionTests: XCTestCase {
     /// mangles names and there is no knob to tell it otherwise.
     func testInstructionsCarryTheRosterAndDemandFuzzyMatching() {
         let text = LogExtraction.instructions(players: [
-            Player(name: "steve", aliases: ["스티브", "형"]),
+            Player(name: "steve"),
             Player(name: "dave"),
         ])
         XCTAssertTrue(text.contains("steve"))

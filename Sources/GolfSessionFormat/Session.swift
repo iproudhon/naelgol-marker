@@ -3,36 +3,43 @@ import Foundation
 /// Milliseconds since the Unix epoch. One clock for every stream in a session.
 public typealias Millis = Int64
 
-/// One person in the group, and every name the group actually calls them.
+/// One player: an id and a display name, and nothing else.
 ///
-/// A single name is not enough. A player is "steve" on the card, "스티브" to one
-/// friend, "형" to another, and "Mr. Jung" when someone is being funny — often
-/// all within one hole. The reconstruction attributes shots by matching spoken
-/// names against this list, so a player addressed only by a nickname for half the
-/// round is still attributable. Names are matched, never inferred from a roster
-/// position.
+/// **A player used to carry `aliases` too — nicknames, given names, honorifics —
+/// and that was removed by the user on 2026-08-31 ("no nick name part for player
+/// names").** It is worth knowing what went with it, because the argument for it
+/// was real and the cost is real: diarization was cut *(user, 2026-08-26)*, so a
+/// spoken name is the only attribution signal there is, and a player is "steve" on
+/// the card, "스티브" to one friend and "형" to another, often inside one hole.
+/// Attribution now matches what was said against **one** name per player, and it
+/// still matches on the *name*, never on a roster position — a removal slides
+/// every later slot down one, so an index would go on answering under somebody
+/// else's name. `Mark.player`, `Correction.player` and `LogEntry.player` all store
+/// `Player.id` for that reason, which is unchanged.
+///
+/// **The removal is decode-safe in exactly one direction, and it matters which.**
+/// *Old file, new build*: an `aliases` key in a `meta.json`, a journal row or an
+/// exported bundle written before today is an unknown key, which `JSONDecoder`
+/// ignores — nothing already on disk stops parsing, and `SessionFormatTests` pins
+/// it. *New file, old build*: the previous `Player` declared `aliases` as a
+/// **non-optional** `[String]`, so a build without this change hits `keyNotFound`
+/// on anything written now. Inside a session folder that is nobody's problem — a
+/// folder is read by the app that wrote it. Across the wire it is, which is why
+/// `RoundBundle.currentVersion` moved to 2: an old build then says "exported by a
+/// newer version of Marker" instead of naming a field its reader has never heard
+/// of. That is the distinction the version field is for — an **added** key is
+/// invisible to an old reader and must not bump it; a **removed** non-optional one
+/// is a hard break and must.
 public struct Player: Codable, Sendable, Hashable, Identifiable {
     /// Stable key written into marks.jsonl, corrections.jsonl and round.json.
     /// Defaults to `name`, but survives a later rename of the display name.
     public var id: String
-    /// Primary display name, and the one used on a scorecard.
+    /// Display name, and the one used on a scorecard.
     public var name: String
-    /// Nicknames, given names, honorifics — anything said out loud.
-    public var aliases: [String]
 
-    public init(id: String? = nil, name: String, aliases: [String] = []) {
+    public init(id: String? = nil, name: String) {
         self.name = name
         self.id = id ?? name
-        self.aliases = aliases
-    }
-
-    /// Every name this player answers to, primary first. This is what goes to
-    /// the model, not the display name alone.
-    public var allNames: [String] { [name] + aliases }
-
-    /// For logs and CLI output: `steve (스티브, 형)`.
-    public var summary: String {
-        aliases.isEmpty ? name : "\(name) (\(aliases.joined(separator: ", ")))"
     }
 }
 

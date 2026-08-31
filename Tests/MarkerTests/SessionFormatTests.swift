@@ -97,8 +97,8 @@ final class SessionFormatTests: XCTestCase {
     func testMetaAtomicWriteAndReread() throws {
         let s = session()
         try s.create()
-        var meta = SessionMeta(sessionID: "abc", course: "Naelgol", players: [Player(name: "steve", aliases: ["스티브", "형"]),
-                                          Player(name: "dave")],
+        var meta = SessionMeta(sessionID: "abc", course: "Naelgol",
+                               players: [Player(name: "steve"), Player(name: "dave")],
                                start: 1_700_000_000_000, end: nil,
                                device: "iPhone", audioFormat: "m4a-aac-32k-mono")
         try s.writeMeta(meta)
@@ -109,9 +109,7 @@ final class SessionFormatTests: XCTestCase {
         XCTAssertEqual(try s.readMeta().end, 1_700_016_000_000)
         let reread = try s.readMeta().players
         XCTAssertEqual(reread.map(\.name), ["steve", "dave"])
-        XCTAssertEqual(reread[0].aliases, ["스티브", "형"])
-        XCTAssertEqual(reread[0].allNames, ["steve", "스티브", "형"])
-        XCTAssertEqual(reread[1].aliases, [])
+        XCTAssertEqual(reread.map(\.id), ["steve", "dave"])
     }
 
     func testCorrectionRoundTrip() throws {
@@ -132,13 +130,13 @@ final class SessionFormatTests: XCTestCase {
         XCTAssertNil(cs[1].club)
     }
 
-    /// Attribution matches on names as spoken, so nicknames and non-Latin names
-    /// have to survive the round trip byte-for-byte.
-    func testPlayerAliasesAndNonLatinNamesRoundTrip() throws {
+    /// Attribution matches on the name as spoken, so a non-Latin name has to
+    /// survive the round trip byte-for-byte — and so does the **id**, which
+    /// defaults to it and is what `marks.jsonl` stores.
+    func testNonLatinPlayerNamesRoundTrip() throws {
         let s = session()
         try s.create()
-        let roster = [Player(name: "정성훈", aliases: ["성훈", "형", "Sung"]),
-                      Player(name: "mike", aliases: ["마이크"])]
+        let roster = [Player(name: "정성훈"), Player(name: "mike")]
         var meta = SessionMeta(sessionID: "abc", players: roster,
                                start: 1, device: "iPhone", audioFormat: "m4a")
         meta.course = "내골 CC"
@@ -147,16 +145,24 @@ final class SessionFormatTests: XCTestCase {
         let back = try s.readMeta()
         XCTAssertEqual(back.course, "내골 CC")
         XCTAssertEqual(back.players, roster)
-        XCTAssertEqual(back.players[0].allNames, ["정성훈", "성훈", "형", "Sung"])
-        // id defaults to the primary name and is what marks.jsonl stores.
         XCTAssertEqual(back.players[0].id, "정성훈")
-        XCTAssertEqual(back.players[0].summary, "정성훈 (성훈, 형, Sung)")
-        XCTAssertEqual(back.players[1].summary, "mike (마이크)")
     }
 
-    func testPlayerWithoutAliasesSummarisesAsJustTheName() {
-        XCTAssertEqual(Player(name: "dave").summary, "dave")
-        XCTAssertEqual(Player(name: "dave").allNames, ["dave"])
+    /// **A round recorded before 2026-08-31 still opens.** Aliases were removed
+    /// that day; every `meta.json`, journal row and export written until then
+    /// carries an `aliases` key, and a decoder that choked on it would make those
+    /// rounds unreadable — the `Hole.paths` failure, from the other direction.
+    func testAMetaFileWrittenWithAliasesStillDecodes() throws {
+        let s = session()
+        try s.create()
+        let legacy = """
+            {"sessionID":"abc","players":[{"id":"steve","name":"steve",\
+            "aliases":["스티브","형"]}],"start":1,"device":"iPhone","audioFormat":"m4a"}
+            """
+        try Data(legacy.utf8).write(to: s.path(.meta))
+
+        let back = try s.readMeta()
+        XCTAssertEqual(back.players, [Player(id: "steve", name: "steve")])
     }
 
     func testClockIsMillisecondsSinceEpoch() {

@@ -88,7 +88,7 @@ public struct AppleTranscriber: Transcriber {
         // module. **But nothing may depend on it.** Since diarization was cut, a
         // spoken name is the only attribution signal there is, so the correction
         // has to happen further down, in the model step, by matching a mangled name
-        // against the roster's `allNames` phonetically rather than exactly.
+        // against the roster phonetically rather than exactly.
         let analysisContext = AnalysisContext()
         if !context.contextualStrings.isEmpty {
             analysisContext.contextualStrings = [.general: context.contextualStrings]

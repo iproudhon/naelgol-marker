@@ -4,15 +4,14 @@ import GolfSessionFormat
 
 final class TranscriptionContextTests: XCTestCase {
 
-    /// A player called "형" by one friend and "스티브" by another is attributable
-    /// by those names and by nothing else, so the recognizer has to be told all of
-    /// them — `allNames`, never `name`.
-    func testRoundContextCarriesEveryNameThePlayerIsCalled() {
+    /// A spoken name is the only attribution signal there is — diarization was cut
+    /// and aliases were removed — so the roster has to reach the recognizer.
+    func testRoundContextCarriesTheRoster() {
         let ctx = TranscriptionContext.forRound(players: [
-            Player(name: "steve", aliases: ["스티브", "형"]),
+            Player(name: "steve"),
             Player(name: "dave"),
         ])
-        for expected in ["steve", "스티브", "형", "dave"] {
+        for expected in ["steve", "dave"] {
             XCTAssertTrue(ctx.contextualStrings.contains(expected), "missing \(expected)")
         }
     }

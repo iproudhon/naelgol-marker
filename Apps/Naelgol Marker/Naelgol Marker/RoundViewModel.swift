@@ -124,28 +124,42 @@ final class RoundViewModel: ObservableObject {
         return (here, acc)
     }
 
-    /// One row per player, each with its own aliases field. A single
-    /// comma-separated box cannot express "steve is also 스티브 and 형", and
-    /// nicknames are most of what actually gets said on a course.
+    /// One row per player, and a row is a name.
+    ///
+    /// It carried an aliases field until 2026-08-31; see `Player`.
     struct PlayerDraft: Identifiable, Equatable {
         let id = UUID()
         var name: String = ""
-        /// Comma-separated in the UI, split on the way out.
-        var aliasText: String = ""
 
-        var aliases: [String] {
-            aliasText.split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
         var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-        var player: Player? {
-            trimmedName.isEmpty ? nil : Player(name: trimmedName, aliases: aliases)
-        }
+        var player: Player? { trimmedName.isEmpty ? nil : Player(name: trimmedName) }
     }
 
-    @Published var drafts: [PlayerDraft] = RoundViewModel.loadDrafts()
-    @Published var courseText: String = UserDefaults.standard.string(forKey: "course") ?? ""
+    /// **A new round starts with one empty row, every time** *(user, 2026-08-31:
+    /// "no set names when starting a new round — start with just one player with
+    /// empty name")*.
+    ///
+    /// It used to restore the previous round's roster from `UserDefaults`, on the
+    /// argument that the group is usually the same four people. What that actually
+    /// produced was a Start button that was live the moment the screen appeared,
+    /// over names nobody had looked at — so a round played with a different group
+    /// records the old one unless somebody notices and edits three rows. An empty
+    /// row cannot be started by accident: `canStart` is `!players.isEmpty` and a
+    /// draft with a blank name is not a player.
+    ///
+    /// The old key is not read and not written. Nothing migrates it: it holds
+    /// names, which the golfer can retype, and leaving a reader for it would make
+    /// the previous roster reappear on exactly the launch this rule exists to stop.
+    @Published var drafts: [PlayerDraft] = [PlayerDraft()]
+    /// The free-text course name, for a course nobody has mapped. **Not
+    /// remembered either**, for the same reason the roster is not: it is the other
+    /// branch of the same screen — on a phone with no course files it is a text
+    /// field that came up pre-filled with a name nobody had looked at, and Start
+    /// was live over it. What *is* remembered is `CourseLibrary.selectedID`, which
+    /// is a different thing: a picker showing the course by name, so what was
+    /// carried over is legible on the screen rather than sitting in a box that
+    /// looks like it was just typed.
+    @Published var courseText: String = ""
 
     var players: [Player] { drafts.compactMap(\.player) }
     var playerIDs: [String] { players.map(\.id) }
@@ -153,23 +167,6 @@ final class RoundViewModel: ObservableObject {
     func addPlayer() { drafts.append(PlayerDraft()) }
     func removePlayers(at offsets: IndexSet) {
         drafts = drafts.enumerated().filter { !offsets.contains($0.offset) }.map(\.element)
-    }
-
-    // Round-to-round the group is usually the same four people, so the roster —
-    // aliases included — is worth remembering.
-    private static let draftsKey = "playerDrafts.v1"
-
-    private static func loadDrafts() -> [PlayerDraft] {
-        guard let raw = UserDefaults.standard.array(forKey: draftsKey) as? [[String: String]],
-              !raw.isEmpty else {
-            return [PlayerDraft()]
-        }
-        return raw.map { PlayerDraft(name: $0["name"] ?? "", aliasText: $0["aliases"] ?? "") }
-    }
-
-    private func saveDrafts() {
-        let raw = drafts.map { ["name": $0.name, "aliases": $0.aliasText] }
-        UserDefaults.standard.set(raw, forKey: Self.draftsKey)
     }
 
     private var session: RoundSession?
@@ -196,8 +193,6 @@ final class RoundViewModel: ObservableObject {
     func startRound() async {
         guard state != .recording else { return }
         errorMessage = nil
-        saveDrafts()
-        UserDefaults.standard.set(courseText, forKey: "course")
 
         // **`recordAudio: false` is the default, not a disabled feature.** It
         // means "do not open the microphone *with the round*" — recording is a

@@ -52,6 +52,7 @@ struct RoundScreen: View {
     /// is a whole sentence and the keyboard covers the list it came from.
     @State private var editing: LogEntry?
     @State private var showHistory = false
+    @State private var exporting = false
     @State private var showRoster = false
     @State private var showModels = false
     /// Re-reading one entry's audio with the bigger model. Its own object because
@@ -129,6 +130,7 @@ struct RoundScreen: View {
             case "detail":  detailCell = ScorecardBand.Cell(
                                 player: doc.players.first?.id ?? "", hole: hole)
             case "marker":  showMarker = true
+            case "export":  exporting = true
             default: break
             }
             if DemoSeed.wantsMap { holeFocus = HoleFocus(ref: holeRefFor(hole)) }
@@ -177,6 +179,9 @@ struct RoundScreen: View {
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(doc: doc, holeLabel: label(forHole:))
+        }
+        .sheet(isPresented: $exporting) {
+            RoundExportSheet(folder: doc.folder, library: library)
         }
         // Reopening a finished round is the Marker button's job now: a round does
         // not end when the golfer stops talking — the scores get said on the way to
@@ -715,6 +720,15 @@ struct RoundScreen: View {
             Button { copyTranscript() } label: {
                 Label(showAllHoles ? "Copy whole round" : "Copy hole \(holeRef)",
                       systemImage: "doc.on.doc")
+            }
+            // **Beneath Copy, and named differently, because they are not the same
+            // thing.** Copy puts `RoundExport`'s logs and events on the clipboard
+            // for a model; Export puts the whole round — scores, marks, the track,
+            // the course file and its terrain — where another phone can take it
+            // back. The one is safe in a prompt and the other is the answer key, and
+            // once either is on a clipboard nothing says which.
+            Button { exporting = true } label: {
+                Label("Export round…", systemImage: "square.and.arrow.up")
             }
             // Only offered when somebody has a course handicap. A Net toggle that
             // changes nothing on screen is a control that looks broken.

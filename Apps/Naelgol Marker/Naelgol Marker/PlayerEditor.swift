@@ -2,7 +2,7 @@ import SwiftUI
 import GolfSessionFormat
 import GolfCourse
 
-/// One player's name, the names they answer to, their handicap index and their tee.
+/// One player's name, their handicap index and their tee.
 ///
 /// **Three numbers, and only two of them are stored.** The index is the player's
 /// own and is portable; the tee carries the USGA rating and slope **frozen as they
@@ -21,23 +21,13 @@ struct PlayerEditor: View {
     let course: Course?
 
     @State private var name: String = ""
-    @State private var aliases: String = ""
     @State private var indexText: String = ""
 
     var body: some View {
         Form {
-            Section {
+            Section("Name") {
                 TextField("Name", text: $name)
                     .onSubmit(commitName)
-                TextField("Also called", text: $aliases)
-                    .onSubmit(commitName)
-            } header: {
-                Text("Name")
-            } footer: {
-                // Attribution matches what was *said* against every name a player
-                // answers to, never a roster position.
-                Text("Comma separated. A player is often \u{201C}steve\u{201D} on the card and "
-                   + "something else out loud, sometimes inside one hole.")
             }
 
             Section {
@@ -66,7 +56,6 @@ struct PlayerEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             name = player.name
-            aliases = player.aliases.joined(separator: ", ")
             indexText = doc.index(of: player.id).map { String(format: "%.1f", $0) } ?? ""
         }
         // A Form field that only commits on Submit loses whatever was typed when
@@ -119,13 +108,8 @@ struct PlayerEditor: View {
     /// or every visit to this screen leaves two entries in the history.
     private func nameEntry() -> JournalEntry? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list = aliases.split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        guard !trimmed.isEmpty,
-              trimmed != player.name || list != player.aliases else { return nil }
-        return JournalEntry(act: .editPlayer, player: player.id,
-                            name: trimmed, aliases: list)
+        guard !trimmed.isEmpty, trimmed != player.name else { return nil }
+        return JournalEntry(act: .editPlayer, player: player.id, name: trimmed)
     }
 
     private func indexEntry() -> JournalEntry? {

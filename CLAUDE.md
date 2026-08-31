@@ -87,7 +87,7 @@ swift run golfctl live recording.m4a --realtime [--model VARIANT]
 # Re-read one stretch of a recording with a chosen model — the CLI half of the
 # app's "Transcribe again" button, and the only place that path can be watched here.
 swift run golfctl relisten recording.m4a --from 4.5 --to 7 --model openai_whisper-small
-swift run golfctl relisten recording.m4a --players 'steve=스티브|형,dave'   # +roster prompt
+swift run golfctl relisten recording.m4a --players 'steve,dave'   # +roster prompt
 swift run golfctl transcribe <session> --show-vocab      # what the recognizer is told
 swift run golfctl transcribe <session> --no-vocab        # the A/B; see the invariant
 
@@ -159,10 +159,53 @@ asked. Rows are tappable; denied rows open Settings.
 the `CLLocationManager` delegate fires `locationManagerDidChangeAuthorization` immediately, so
 without that guard the app throws a location dialog on launch before the user has typed a name.
 
-**Players are `Player`, not `String`** — `name` plus `aliases`, because a player is "steve" on
-the card, "스티브" to one friend and "형" to another, often inside one hole. Attribution matches
-spoken names against `allNames`, never a roster position. `Mark.player` / `Correction.player`
-store `Player.id` (defaults to `name`). CLI syntax: `--players 'steve=스티브|형,dave'`.
+**Players are `Player`, not `String`** — an id and **one** display name. `Player.aliases` and
+`allNames` existed until **2026-08-31 and were removed by the user** ("no nick name part for
+player names"); the removal is decode-safe (an `aliases` key in an old `meta.json`, journal row
+or export is an unknown key `JSONDecoder` ignores) and it is total — the field, the journal
+act's parameter, `RoundExport`, `TranscriptionContext.names` and the CLI's `name=alias|alias`
+syntax all went, because a syntax still accepted and no longer doing anything is worse than one
+that is gone (`--players` now *refuses* an `=`). What survives is the reason the type exists:
+attribution matches on the **name**, never on a roster position — a removal slides every later
+slot down one, so an index would go on answering under somebody else's name.
+`Mark.player` / `Correction.player` / `LogEntry.player` store `Player.id` (defaults to `name`).
+CLI syntax: `--players 'steve,dave'`. **The cost is real and is now a known gap**: diarization
+was cut, so a spoken name is the only attribution signal there is, and a card or a sentence in
+the other script than the roster now matches nobody — `CardReading` *reports* that as an
+unmatched row rather than guessing.
+
+**A new round starts with one player and an empty name** *(user, 2026-08-31)*. `RoundViewModel`
+no longer restores the previous roster from `UserDefaults` (`playerDrafts.v1` is neither read
+nor written, and nothing migrates it). The old behaviour made Start live the instant the screen
+appeared, over names nobody had looked at, so a round played with a different group recorded the
+old one. An empty row cannot be started by accident: `canStart` is `!players.isEmpty` and a
+draft with a blank name is not a player. **The free-text course name went too** (`marker`'s
+`"course"` key): it is the other branch of the same screen, and on a phone with no course files
+it came up pre-filled with a name nobody had looked at. What *is* still carried over is
+`CourseLibrary.selectedID` — a picker showing the course by name, so what was remembered is
+legible on screen rather than sitting in a box that looks freshly typed.
+
+**A round is imported from the clipboard *or* a file, and the file half is not optional**
+*(user, 2026-08-31)*. Export offers a `ShareLink`, so a round arrives by AirDrop, Mail or iCloud
+Drive — as a **document**, which a clipboard cannot reach; without `.fileImporter` the only way
+in was to open it elsewhere and hand-copy 400 KB of base64. Three things this depends on:
+`startAccessingSecurityScopedResource()` (a URL from the picker is outside the container, and
+reading without the scope fails with a permission error that reads exactly like a corrupt
+export — balanced by `defer`, or it leaks a sandbox extension); the read being **off the main
+actor**, since a file in iCloud Drive may still need downloading; and both roads ending in one
+`decode(_:from:)` that sets `sourceName` itself, so a paste always clears it and "From
+<file>" can never stand over a round that arrived another way. The old `TextEditor` is **gone**
+— it grew to fit a 400 KB paste and pushed the Import button off screen, and once a file could
+be chosen it was a blank void under two working buttons; what it really guarded, a paste
+failing in silence, is now an **empty clipboard reported out loud**.
+
+**`RoundBundle.currentVersion` is 2, and the rule for moving it is which direction breaks.**
+An *added* key (`CourseData.terrainOmitted`) is invisible to an older reader, so bumping for one
+would make that reader refuse — "update the app" — a document it reads perfectly. A *removed
+non-optional* property (`Player.aliases`) is a hard break the other way: the older reader hits
+`keyNotFound` and reports a missing field of **ours**, which is the confusion `BundleText`'s
+`Envelope` probe exists to prevent, arriving from the far side. `isSupported` is
+`version <= currentVersion`, so every v1 document still reads.
 
 **The setup screen is a `Form`, not a hand-rolled `VStack`.** The VStack version squeezed its
 content when the keyboard appeared and the large navigation title landed on top of the players
@@ -844,8 +887,10 @@ The target uses an Xcode 16+ **synchronized root group**, so a `.swift` file dro
   stays because it costs nothing and would apply to a `DictationTranscriber` module,
   but **nothing may depend on it**. Consequence: diarization was cut, so a spoken
   name is the *only* attribution signal, and this was the knob protecting it.
-  **Name matching in the model step must be phonetic/fuzzy against the roster's
-  `allNames`, never exact.** research-live-transcription.md §2.5.
+  **Name matching in the model step must be phonetic/fuzzy against the roster,
+  never exact** — and since aliases were removed on 2026-08-31 there is exactly one
+  name per player to match against, which makes it matter more, not less.
+  research-live-transcription.md §2.5.
 - **The round is bilingual, and one locale cannot cover it.** *(Requirement stated
   2026-08-27: English and Korean, automatically. Everything below is the **Apple**
   path, which is now the comparison arm rather than the app's engine — Whisper
@@ -1246,8 +1291,8 @@ The target uses an Xcode 16+ **synchronized root group**, so a `.swift` file dro
   nothing else.** *(2026-08-28; this replaces the "deliberately not wired" note.)*
   Whisper reads the prompt as *previous text*, so it is evidence about the language:
   a couple of hundred English golf words in front of a Korean phrase argues for the
-  failure the user reported twice. `TranscriptionContext.names` (roster and aliases,
-  in both scripts) is the only thing that reaches a decoder; `contextualStrings` keeps
+  failure the user reported twice. `TranscriptionContext.names` (the roster — one
+  name per player since 2026-08-31) is the only thing that reaches a decoder; `contextualStrings` keeps
   the whole vocabulary for engines where the knob is not a language signal. **The live
   path stays unwired** — least context, most to lose. Measured on four fixtures with
   and without a bilingual roster: no language flipped, nothing looped; but the
@@ -2706,6 +2751,13 @@ screenshot. Two things the obvious version gets wrong:
 - **Only two courses have terrain**, both in California, both reporting 1 m lidar. The
   coarse-product path (`native > 1.5`, printed as *NOT lidar*) and the void path have
   never been exercised against a real response.
+- **A name in the other script now matches nobody.** Aliases were removed on 2026-08-31, so a
+  roster that says `steve` does not resolve a card row or a spoken "스티브". `CardReading`
+  returns the row with a nil `player` rather than guessing, and the extraction prompt still asks
+  the *model* to allow a different script — but our own `CardReading.match` cannot cross scripts
+  and nothing measures how often that costs a row. It bites hardest for a bilingual group, which
+  is the group this app is for. **Attribution accuracy is still the metric that decides the
+  feature**; watch it in `GolfEval` (L5).
 - WhisperKit's iOS floor is still unverified (PLAN §4).
 - **A guessed par is indistinguishable from a surveyed one.** `OSMCourse` writes
   `par: 4` where the tag is missing — 11% of US hole ways — and `Hole.par` is a

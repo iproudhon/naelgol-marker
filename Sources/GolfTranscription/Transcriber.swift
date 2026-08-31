@@ -94,8 +94,8 @@ public struct TranscriptionContext: Sendable {
     /// uncorrelated, and reconciling them is the model step's job, not this
     /// layer's. research-live-transcription.md §0.
     public var locales: [String]
-    /// Everything the recognizer should expect to hear: player names and their
-    /// aliases, clubs, scoring terms, lies.
+    /// Everything the recognizer should expect to hear: player names, clubs,
+    /// scoring terms, lies.
     public var contextualStrings: [String]
 
     /// Just the roster — every name the group actually says out loud.
@@ -106,8 +106,8 @@ public struct TranscriptionContext: Sendable {
     /// couple of hundred English golf words is evidence that the audio is English
     /// — the inverse of the bug that was reported twice ("I said English and it
     /// came out Korean", one language stuck across a whole burst). Names are short
-    /// and, in a bilingual roster, written in both scripts, so they carry the
-    /// attribution signal without carrying a verdict about the language.
+    /// and carry the attribution signal without carrying a verdict about the
+    /// language.
     ///
     /// Which matters more here than it would anywhere else: diarization was cut,
     /// so a spoken name is the **only** attribution signal there is.
@@ -131,9 +131,10 @@ public struct TranscriptionContext: Sendable {
     public static func forRound(players: [Player],
                                 locales: [String] = TranscriptionContext.defaultLocales,
                                 extra: [String] = []) -> TranscriptionContext {
-        // `allNames`, not `name` — a player called only "형" by one friend and
-        // "스티브" by another is attributable by those and by nothing else.
-        let names = dedupe(players.flatMap(\.allNames))
+        // One name per player since aliases were removed *(user, 2026-08-31)*.
+        // Still deduped: two players may well be typed with the same name, and a
+        // repeated term in a Whisper prompt is a nudge toward repeating it.
+        let names = dedupe(players.map(\.name))
         return TranscriptionContext(
             locales: locales,
             contextualStrings: dedupe(names + GolfVocabulary.all + extra),

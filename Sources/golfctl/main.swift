@@ -3,7 +3,7 @@
 // Every stage caches into the session folder, so stages are independently
 // re-runnable: re-tuning a prompt never re-runs a 30-minute transcription.
 //
-//   golfctl record  --out Sessions --players 'steve=스티브|형,dave' --course "Naelgol"
+//   golfctl record  --out Sessions --players 'steve,dave' --course "Naelgol"
 //   golfctl inspect <session>
 //   golfctl course  sample --out Courses   |   golfctl course show <course.json>
 //   golfctl transcribe <session> --asr apple|whisperkit          (phase 2)
@@ -69,19 +69,20 @@ struct Args {
             .filter { !$0.isEmpty }
     }
 
-    /// `name=alias|alias` per player, comma-separated. Aliases are the names the
-    /// group actually says out loud, which is what the reconstruction matches on:
-    ///     --players 'steve=스티브|형,dave=데이브,mike'
+    /// One name per player, comma-separated: `--players 'steve,dave,mike'`.
+    ///
+    /// It used to be `name=alias|alias`; aliases were removed on 2026-08-31 and the
+    /// `=` half went with them, because a syntax still accepted and no longer doing
+    /// anything is worse than one that is gone. Anything after an `=` is therefore
+    /// **refused out loud** rather than folded into the name, which would file a
+    /// round under a player called "steve=스티브".
     func players(_ k: String) -> [Player] {
         list(k).map { entry in
-            let parts = entry.split(separator: "=", maxSplits: 1)
-            let name = parts[0].trimmingCharacters(in: .whitespaces)
-            let aliases = parts.count > 1
-                ? parts[1].split(separator: "|")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-                : []
-            return Player(name: name, aliases: aliases)
+            let name = entry.trimmingCharacters(in: .whitespaces)
+            if let head = name.split(separator: "=").first, name.contains("=") {
+                fail("--players no longer takes aliases — write '\(head)', not '\(name)'")
+            }
+            return Player(name: name)
         }
     }
 }
@@ -123,7 +124,7 @@ func cmdRecord(_ args: Args) {
 
     print("recording -> \(session.folder.url.path)")
     let roster = args.players("players")
-    print("players: \(roster.isEmpty ? "(none)" : roster.map(\.summary).joined(separator: ", "))")
+    print("players: \(roster.isEmpty ? "(none)" : roster.map(\.name).joined(separator: ", "))")
     print("audio:   \(wantsAudio ? session.audio.describedFormat : "disabled (--no-audio)")")
     if !session.locationAvailable {
         print("gps:     UNAVAILABLE — CoreLocation needs a bundled app, and this is a CLI.")
@@ -416,7 +417,7 @@ func summarize(_ folder: SessionFolder) {
     let dur = meta.end.map { Double($0 - meta.start) / 1000 }
     print("  id       \(meta.sessionID)")
     print("  course   \(meta.course ?? "—")")
-    print("  players  \(meta.players.isEmpty ? "—" : meta.players.map(\.summary).joined(separator: ", "))")
+    print("  players  \(meta.players.isEmpty ? "—" : meta.players.map(\.name).joined(separator: ", "))")
     print("  device   \(meta.device)")
     print("  start    \(start)")
     print("  duration \(dur.map { String(format: "%.1fs", $0) } ?? "(still open)")")
@@ -926,15 +927,16 @@ case "transcribe": cmdTranscribe(args)
 case "models":  cmdModels(args)
 case "live":    cmdLive(args)
 case "relisten": cmdRelisten(args)
+case "round":   cmdRound(args)
 case "bundle", "reconstruct", "eval", "sweep":
     fail("\(args.subcommand): not implemented yet — phase 3+. See docs/PLAN.md §6.")
 default:
     print("""
     golfctl — Marker's off-device CLI
 
-      record   --out DIR --players 'steve=스티브|형,dave' --course NAME
+      record   --out DIR --players 'steve,dave' --course NAME
                [--seconds N] [--no-audio] [--no-gps] [--mic-off]
-               players are name=alias|alias, comma separated
+               players are plain names, comma separated
                --mic-off starts with the microphone off, as the app does;
                'r ENTER' then starts and stops recording during the round.
       inspect  <session>
@@ -953,6 +955,12 @@ default:
                [--vocab word,word] [--show-vocab] [--no-vocab]
                on-device ASR over every audio segment, onto the session clock.
                Caches per segment — re-running does only what is missing.
+      round    export <session> [--out FILE] [--courses DIR] [--plain]
+               import <file|->   [--out DIR] [--courses DIR] [--dry-run]
+               show   <file|->   [--model-visible]
+               a whole round — its streams, its course and that course's
+               terrain — as one document that survives a copy and a paste.
+               golfctl round export S | pbcopy   /   pbpaste | golfctl round import -
       course   sample --out DIR          write the built-in sample course
                show <course.json> [--hole N]
                import --url <page> | --card <file.pdf|.jpg|.png|.txt>

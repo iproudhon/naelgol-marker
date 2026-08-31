@@ -54,6 +54,17 @@ public struct CourseStore: Sendable {
         _ = try FileManager.default.replaceItemAt(elevationURL(for: id), withItemAt: tmp)
     }
 
+    /// Whether a `.dem` is on disk, without decoding hundreds of kilobytes of it.
+    ///
+    /// The question "does this course have terrain?" is asked in places that do not
+    /// want the grid — an export sheet deciding whether to offer a toggle, an
+    /// import deciding what to say — and `loadElevation(id:) != nil` answers it by
+    /// parsing the whole file. On the main actor that is the same hang the import
+    /// sheet was already fixed for once.
+    public func elevationExists(id: String) -> Bool {
+        FileManager.default.fileExists(atPath: elevationURL(for: id).path)
+    }
+
     /// Nil when the course has no terrain, which is not an error — the plays-like
     /// number simply does not appear, the same way `rise` is nil for a hole with
     /// no elevation behind it.

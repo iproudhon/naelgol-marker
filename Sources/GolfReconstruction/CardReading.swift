@@ -23,8 +23,8 @@ public enum CardReading {
     /// a card is routinely missing a cell, and a reader that refuses the whole
     /// card for one smudge is a reader nobody uses.
     public struct Line: Codable, Sendable, Equatable {
-        /// The name as written on the card — matched against the roster's
-        /// `allNames` afterwards, never used as an id.
+        /// The name as written on the card — matched against the roster
+        /// afterwards, never used as an id.
         public var name: String
         /// hole (1-based playing order) -> strokes.
         public var strokes: [Int: Int]
@@ -41,7 +41,7 @@ public enum CardReading {
     /// scorecard's *par* row is a set of plausible-looking strokes, and a card
     /// whose holes are named nines does not number 1…18.
     public static func instructions(players: [Player], holeCount: Int) -> String {
-        let roster = players.map(\.summary).joined(separator: "; ")
+        let roster = players.map(\.name).joined(separator: "; ")
         return """
         You are reading a golf scorecard that has already been filled in, and \
         listing the strokes each player took on each hole.
@@ -74,10 +74,12 @@ public enum CardReading {
 
     /// Turn read lines into journal-ready proposals against a roster.
     ///
-    /// Name matching is **fuzzy against every name a player answers to**, never
-    /// exact and never positional: a card says "Steve", the roster may know them
-    /// as `steve` with aliases `스티브` and `형`, and the row order on a card has
-    /// nothing to do with the order of the roster.
+    /// Name matching is **fuzzy, and never positional**: a card says "Steve" where
+    /// the roster says `steve`, and the row order on a card has nothing to do with
+    /// the order of the roster. It matches the name and nothing else since aliases
+    /// were removed *(user, 2026-08-31)*, so a card written in the other script
+    /// than the roster matches nobody — which is *reported* as an unmatched row,
+    /// never guessed at.
     ///
     /// Rows matching nobody are returned with a nil `player` rather than dropped —
     /// a card read that silently loses a person looks like a card with three
@@ -114,15 +116,13 @@ public enum CardReading {
     public static func match(_ name: String, in players: [Player]) -> Player? {
         let needle = normalise(name)
         guard !needle.isEmpty else { return nil }
-        for p in players where p.allNames.contains(where: { normalise($0) == needle }) {
+        for p in players where normalise(p.name) == needle {
             return p
         }
         for p in players {
-            for candidate in p.allNames {
-                let c = normalise(candidate)
-                guard c.count >= 2, needle.count >= 2 else { continue }
-                if c.contains(needle) || needle.contains(c) { return p }
-            }
+            let c = normalise(p.name)
+            if c.count >= 2, needle.count >= 2,
+               c.contains(needle) || needle.contains(c) { return p }
         }
         return nil
     }

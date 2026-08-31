@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "GolfCourse", targets: ["GolfCourse"]),
         .library(name: "GolfCourseOSM", targets: ["GolfCourseOSM"]),
         .library(name: "GolfTerrain", targets: ["GolfTerrain"]),
+        .library(name: "GolfExchange", targets: ["GolfExchange"]),
         .library(name: "GolfMap", targets: ["GolfMap"]),
         .library(name: "GolfEval", targets: ["GolfEval"]),
         .executable(name: "golfctl", targets: ["golfctl"]),
@@ -82,6 +83,16 @@ let package = Package(
         // downloaded on the phone.
         .target(name: "GolfTerrain", dependencies: ["GolfCourse"]),
 
+        // Exporting a whole round — the session's streams *plus* the course file
+        // and its terrain — as one pasteable document, and reading one back.
+        // Depends on both halves, which is why it cannot live in either:
+        // `GolfSessionFormat` cannot see a `Course`, and putting round archiving
+        // into `GolfCourse` inverts the concern. Same precedent as `GolfCourseOSM`.
+        // Deliberately NOT dependent on `GolfTranscription`: nothing here needs
+        // WhisperKit, and an importer that dragged half a gigabyte of models into
+        // its dependency graph would be absurd.
+        .target(name: "GolfExchange", dependencies: ["GolfSessionFormat", "GolfCourse"]),
+
         // Hole view (vector + satellite), map, elevation profile.
         .target(name: "GolfMap", dependencies: ["GolfSessionFormat", "GolfStore", "GolfCourse"]),
 
@@ -91,13 +102,14 @@ let package = Package(
         .executableTarget(name: "golfctl",
                           dependencies: ["GolfSessionFormat", "GolfCaptureCore",
                                          "GolfCourse", "GolfCourseOSM", "GolfTerrain",
-                                         "GolfTranscription",
+                                         "GolfExchange", "GolfTranscription",
                                          "AnthropicClient", "GolfReconstruction",
                                          "GolfEval"]),
 
         .testTarget(name: "MarkerTests",
                     dependencies: ["GolfSessionFormat", "GolfCaptureCore",
                                    "GolfCourse", "GolfCourseOSM", "GolfTerrain", "GolfMap",
+                                   "GolfExchange",
                                    "GolfReconstruction",
                                    "GolfTranscription",
                                    .product(name: "WhisperKit", package: "WhisperKit")]),

@@ -51,8 +51,8 @@ final class GolfVocabularyTests: XCTestCase {
 
     func testTheRoundsContextCarriesBothLanguagesAndTheRoster() {
         let context = TranscriptionContext.forRound(
-            players: [Player(name: "steve", aliases: ["스티브"])])
-        XCTAssertTrue(context.contextualStrings.contains("스티브"))
+            players: [Player(name: "steve")])
+        XCTAssertTrue(context.contextualStrings.contains("steve"))
         XCTAssertTrue(context.contextualStrings.contains("버디"))
         XCTAssertTrue(context.contextualStrings.contains("birdie"))
     }
@@ -65,17 +65,19 @@ final class GolfVocabularyTests: XCTestCase {
     /// the knob is not a language signal.
     func testNamesAreSeparateFromTheVocabularyBecauseOnlyNamesReachTheDecoder() {
         let context = TranscriptionContext.forRound(
-            players: [Player(name: "steve", aliases: ["스티브", "형"]),
+            players: [Player(name: "steve"),
                       Player(name: "dave")])
-        XCTAssertEqual(Set(context.names), ["steve", "스티브", "형", "dave"])
+        XCTAssertEqual(Set(context.names), ["steve", "dave"])
         XCTAssertFalse(context.names.contains("birdie"),
                        "a golf word in the prompt is a vote for English")
         XCTAssertFalse(context.names.contains("버디"))
     }
 
-    func testNamesAreDedupedSoARepeatedAliasDoesNotEatThePromptBudget() {
+    /// Two people typed with the same name is an ordinary roster, and a repeated
+    /// term in a Whisper prompt is a nudge toward repeating it.
+    func testNamesAreDedupedSoARepeatedNameDoesNotEatThePromptBudget() {
         let context = TranscriptionContext.forRound(
-            players: [Player(name: "steve", aliases: ["Steve"]),
+            players: [Player(name: "steve"),
                       Player(name: "STEVE")])
         XCTAssertEqual(context.names.count, 1)
     }

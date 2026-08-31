@@ -40,7 +40,7 @@ public struct JournalEntry: Codable, Sendable, Identifiable, Equatable {
         /// were when the round was played**. See the type note on `rating`.
         case setTee
         case addPlayer
-        /// Rename, or change the aliases a player answers to.
+        /// Rename a player.
         case editPlayer
         case removePlayer
         case setCourse
@@ -129,7 +129,6 @@ public struct JournalEntry: Codable, Sendable, Identifiable, Equatable {
     public var par: Int?
 
     public var name: String?
-    public var aliases: [String]?
     public var course: String?
 
     /// The `Event.id` an `acceptEvent` / `rejectEvent` refers to.
@@ -155,7 +154,7 @@ public struct JournalEntry: Codable, Sendable, Identifiable, Equatable {
                 index: Double? = nil,
                 tee: String? = nil, rating: Double? = nil, slope: Int? = nil,
                 par: Int? = nil,
-                name: String? = nil, aliases: [String]? = nil, course: String? = nil,
+                name: String? = nil, course: String? = nil,
                 eventID: String? = nil,
                 prevStrokes: Int? = nil, prevStatValue: Int? = nil,
                 prevIndex: Double? = nil, prevTee: String? = nil,
@@ -165,7 +164,7 @@ public struct JournalEntry: Codable, Sendable, Identifiable, Equatable {
         self.stat = stat; self.statValue = statValue
         self.index = index
         self.tee = tee; self.rating = rating; self.slope = slope; self.par = par
-        self.name = name; self.aliases = aliases; self.course = course
+        self.name = name; self.course = course
         self.eventID = eventID
         self.prevStrokes = prevStrokes; self.prevStatValue = prevStatValue
         self.prevIndex = prevIndex; self.prevTee = prevTee
@@ -336,13 +335,12 @@ public enum JournalReplay {
                 guard let name = e.name else { continue }
                 let id = e.player ?? name
                 guard !s.players.contains(where: { $0.id == id }) else { continue }
-                s.players.append(Player(id: id, name: name, aliases: e.aliases ?? []))
+                s.players.append(Player(id: id, name: name))
 
             case .editPlayer:
                 guard let id = e.player,
                       let i = s.players.firstIndex(where: { $0.id == id }) else { continue }
                 if let name = e.name { s.players[i].name = name }
-                if let aliases = e.aliases { s.players[i].aliases = aliases }
 
             case .removePlayer:
                 guard let id = e.player else { continue }

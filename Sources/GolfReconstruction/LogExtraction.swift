@@ -67,9 +67,7 @@ public enum LogExtraction {
     ///   corrupt sentences that had nothing to do with golf.
     public static func instructions(players: [Player],
                                     glossary: [String: String] = [:]) -> String {
-        let roster = players.map { p in
-            "- \(p.name) (id: \(p.id))" + (p.aliases.isEmpty ? "" : ", also called \(p.aliases.joined(separator: ", "))")
-        }.joined(separator: "\n")
+        let roster = players.map { "- \($0.name) (id: \($0.id))" }.joined(separator: "\n")
 
         // Sorted, so the same roster produces the same prompt twice. A prompt that
         // reorders itself defeats caching and makes two runs incomparable.

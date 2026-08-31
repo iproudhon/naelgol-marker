@@ -156,15 +156,13 @@ final class JournalTests: XCTestCase {
 
     func testAddingRenamingAndRemovingAPlayer() {
         var add = entry(.addPlayer, id: "a", t: 100, player: "steve")
-        add.name = "steve"; add.aliases = ["스티브"]
+        add.name = "steve"
         var edit = entry(.editPlayer, id: "b", t: 200, player: "steve")
         edit.name = "Steve J"
         let remove = entry(.removePlayer, id: "c", t: 300, player: "steve")
 
         let after = JournalReplay.replay([add, edit])
         XCTAssertEqual(after.players.first?.name, "Steve J")
-        XCTAssertEqual(after.players.first?.aliases, ["스티브"],
-                       "an edit that names no aliases must not wipe them")
         XCTAssertEqual(after.players.first?.id, "steve",
                        "the id survives a rename — it is what scores are keyed on")
 

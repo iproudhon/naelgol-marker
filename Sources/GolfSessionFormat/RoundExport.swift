@@ -121,7 +121,7 @@ public enum RoundExport {
         var o: [String: Any] = [
             "start": start,
             "startTime": iso(start),
-            "players": players.map { ["id": $0.id, "name": $0.name, "aliases": $0.aliases] },
+            "players": players.map { ["id": $0.id, "name": $0.name] },
             "logs": ls.sorted { $0.t == $1.t ? $0.id < $1.id : $0.t < $1.t }
                 .map { log($0, players: players, start: start,
                            holeRef: $0.hole.flatMap { holeRefs[$0] }) },

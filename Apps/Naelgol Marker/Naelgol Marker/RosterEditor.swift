@@ -24,23 +24,15 @@ struct RosterEditor: View {
     @State private var draft = ""
     @FocusState private var typing: Bool
     @Environment(\.dismiss) private var dismiss
+    /// Screenshot support only — see `DemoSeed.openPlayer`. Empty in a real build.
+    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
                 Section {
                     ForEach(doc.players) { p in
-                        NavigationLink {
-                            PlayerEditor(doc: doc, player: p, course: course)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name)
-                                if !p.aliases.isEmpty {
-                                    Text(p.aliases.joined(separator: ", "))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
+                        NavigationLink(value: p.id) { Text(p.name) }
                     }
                     .onDelete { offsets in
                         doc.record(offsets.map {
@@ -68,13 +60,23 @@ struct RosterEditor: View {
                 } footer: {
                     // Several at once, because that is how anyone types a foursome
                     // and it is what the person who filed this was trying to do.
-                    Text("One name, or several separated by commas — \u{201C}A, B, C, D\u{201D}. "
-                       + "Nicknames go on each player's own screen; attribution "
-                       + "matches what was said against every name they answer to.")
+                    Text("One name, or several separated by commas — \u{201C}A, B, C, D\u{201D}.")
+                }
+            }
+            .navigationDestination(for: String.self) { id in
+                if let p = doc.players.first(where: { $0.id == id }) {
+                    PlayerEditor(doc: doc, player: p, course: course)
                 }
             }
             .navigationTitle("Players")
             .navigationBarTitleDisplayMode(.inline)
+            #if DEBUG
+            .task {
+                guard path.isEmpty, let id = DemoSeed.openPlayer,
+                      doc.players.contains(where: { $0.id == id }) else { return }
+                path = [id]
+            }
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

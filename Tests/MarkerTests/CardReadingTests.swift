@@ -5,7 +5,7 @@ import XCTest
 final class CardReadingTests: XCTestCase {
 
     private let roster = [
-        Player(name: "steve", aliases: ["스티브", "형"]),
+        Player(name: "steve"),
         Player(name: "dave"),
         Player(name: "min"),
     ]
@@ -20,11 +20,14 @@ final class CardReadingTests: XCTestCase {
         XCTAssertEqual(CardReading.match("  DAVE ", in: roster)?.id, "dave")
     }
 
-    /// A player is "steve" on the card and something else out loud. Attribution
-    /// matches every name they answer to, never a roster position.
-    func testAnAliasMatches() {
-        XCTAssertEqual(CardReading.match("스티브", in: roster)?.id, "steve")
-        XCTAssertEqual(CardReading.match("형", in: roster)?.id, "steve")
+    /// **A name in the other script matches nobody, and is returned unmatched
+    /// rather than guessed at.** Aliases were removed on 2026-08-31, so a card
+    /// written "스티브" against a roster that says "steve" no longer resolves. The
+    /// row survives with a nil `player` — a card read that silently loses a person
+    /// looks like a card with three players on it.
+    func testANameInAnotherScriptMatchesNobodyRatherThanTheWrongPerson() {
+        XCTAssertNil(CardReading.match("스티브", in: roster))
+        XCTAssertNil(CardReading.match("형", in: roster))
     }
 
     func testAPartialNameMatchesInEitherDirection() {
@@ -81,7 +84,7 @@ final class CardReadingTests: XCTestCase {
     /// named nines does not number its holes 1–18.
     func testTheInstructionsCarryTheThreeRulesAndTheRoster() {
         let text = CardReading.instructions(players: roster, holeCount: 18)
-        XCTAssertTrue(text.contains("스티브"), "aliases go to the model, not just names")
+        XCTAssertTrue(text.contains("steve"), "the roster goes to the model")
         XCTAssertTrue(text.contains("PAR"))
         XCTAssertTrue(text.contains("Never estimate"))
         XCTAssertTrue(text.contains("is 10"), "the second nine starts at 10 on an 18")

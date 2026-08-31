@@ -112,16 +112,17 @@ naelgol-marker/
 │   ├── GolfReconstruction/    LogExtraction CardReading
 │   ├── GolfStore/ GolfInsight/ GolfEval/     placeholders
 │   └── golfctl/               main CourseImport CourseOSMCommand CourseElevation
-├── Tests/MarkerTests/         ~473 tests
+│                              RoundArchiveCommand
+├── Tests/MarkerTests/         ~500 tests
 ├── Resources/                 prompt.md  round.schema.json
 ├── Prompts/                   course-card.md  course-card.schema.json
 ├── Courses/                   <id>.json  +  <id>.dem
 └── Apps/Naelgol Marker/       the iOS app
 ```
 
-Approximate sizes, as a sanity check on your own build: SessionFormat 2.4k lines, Course
-3.3k, Map 5.5k, Transcription 2.4k, CaptureCore 1.1k, Exchange 0.7k, golfctl 1.6k, app
-8.3k, tests 7.1k.
+Approximate sizes, as a sanity check on your own build: SessionFormat 2.6k lines, Course
+3.3k, Map 5.5k, Transcription 2.4k, CaptureCore 1.1k, Exchange 1.0k, golfctl 1.7k, app
+8.8k, tests 7.5k.
 
 ### 2.1 `Package.swift` — VERBATIM
 
@@ -3566,14 +3567,15 @@ Two sheets in `RoundTransfer.swift`, and their labels are load-bearing: the roun
   Drive folder, and it arrives as a *document*, which a clipboard cannot reach. Without a
   picker the only way to take one in is to open it in some other app and hand-copy four
   hundred kilobytes of base64.
-  There used to be a `TextEditor` under the buttons; it is gone, and both halves of why are
-  worth keeping. It **grew to fit its content**, so a real paste filled the sheet and pushed
-  the summary and the Import button clean off the screen — found by screenshot, which is the
-  only way it could have been, since every test passes on a view that renders nothing a thumb
-  can reach; that is why anything readable hides the whole section. And once a file could be
-  chosen, what was left of it on arrival was a blank 110-point void under two working buttons.
-  It was really guarding one thing — a paste that fails with nothing on screen to look at —
-  and that is closed properly by **reporting an empty clipboard** instead of doing nothing.
+  **Do not put a paste box under these buttons.** It is the obvious third control and it
+  fails twice: a `TextEditor` **grows to fit its content**, so a real 400 KB paste fills the
+  sheet and pushes the summary and the Import button clean off the screen — a failure only a
+  screenshot finds, since every test passes on a view that renders nothing a thumb can reach —
+  and with two working buttons above it, on arrival it is a blank 110-point void. The one
+  thing it would buy, a paste that fails with nothing on screen to look at, is bought properly
+  by **reporting an empty clipboard** instead of doing nothing. The same rule sends the whole
+  section away the moment anything decodes: nobody reads base64, and what replaces it — the
+  course, the date, the players, the scores — is what somebody needs before saying yes.
 - **Both roads end in one `decode(_:from:)`, and a chosen file is never poured into a state
   string on the way.** `sourceName` is set *inside* that function, so a paste always clears
   it: "From coyote.marker-round.txt" standing over a round that arrived by another road is a
@@ -3742,7 +3744,7 @@ xcodebuild -scheme "Naelgol Marker" \
 | `LiveTranscript` | Live ASR → `log.jsonl`. |
 | `LogStore`, `LogPlacement`, `StableLocation`, `LogEditor`, `LogRetranscribe` | The log path. |
 | `CourseFinder`, `TerrainSheet`, `WhisperModelPicker` | The three downloads. |
-| `RoundTransfer` | `RoundExportSheet` and `RoundImportSheet` — §12.5. |
+| `RoundTransfer` | `RoundExportSheet` and `RoundImportSheet` — clipboard **and** file, §12.5.6. |
 | `ScorecardBand`, `HistoryView`, `HoleDetailSheet`, `RosterEditor`, `PlayerEditor` | Card + journal UI. |
 | `LiveLocation` | Round-independent position feed. |
 | `RenderHarness` | DEBUG-only launch-argument harness (§14.7). |
@@ -3760,10 +3762,12 @@ appears, over names nobody has looked at**, so a round played with a different g
 records the old one. An empty row cannot be started by accident: `canStart` is `!players.isEmpty`
 and a draft with a blank name is not a player.
 
-The *course* is remembered, and that is a different mechanism (`CourseLibrary.selectedID`) doing a
-different thing — a group replays a course far more often than it replays a roster, and the course
-is shown as a named picker rather than a text field, so what is remembered is legible on the
-screen rather than inferred from a filled-in box.
+**The free-text course name is not remembered either**, and it is the same rule, not an
+oversight: on a phone with no course files that field is what the screen shows, and a pre-filled
+one is a name nobody looked at with Start live over it. What *is* carried over is
+`CourseLibrary.selectedID` — a different mechanism doing a different thing. A group replays a
+course far more often than it replays a roster, and a picker shows the course **by name**, so what
+was remembered is legible on the screen rather than sitting in a box that looks freshly typed.
 
 A player row is **one field**. The roster can be changed mid-round (`RosterEditor`, §14.5) without
 losing anyone's scores, which is why the setup screen does not need to be complete.
@@ -4114,6 +4118,9 @@ in by hand.** This is the one thing whose absence changes what the product is.
 | Hole view, 5 rounds of hands-on feedback | device |
 | Round export/import round-trip, course + DEM byte-identical | macOS, real course |
 | Both wire forms, mangled paste, five error paths | macOS + test |
+| Terrain optional: 422,882 → 33,157 chars on a real course; all four import outcomes | macOS + test |
+| The importer's three states — two roads, a file decoded and named, an unreadable one | simulator |
+| One empty player row, and two stale `UserDefaults` rosters ignored | simulator |
 | The delegate-retention bug; the invisible nil-hole row | **found on device** |
 
 ### 15.4 Never verified anywhere
@@ -4219,7 +4226,7 @@ in by hand.** This is the one thing whose absence changes what the product is.
 
 ## 16. Verification checklist
 
-Tests in the original: **473, 1 skipped** (a microphone-permission test that skips when the mic is
+Tests in the original: **503, 1 skipped** (a microphone-permission test that skips when the mic is
 already authorized). Use that as an order-of-magnitude target, not a quota. The ones below are the
 tests that would have caught a real, shipped bug.
 
@@ -4402,3 +4409,9 @@ A short list, because each cost a day or more and each looks correct going in.
 | `Text("a" + "b")` with markdown | Renders literal asterisks |
 | A `.dem` named `<id>.elevation.json` | Fails to parse on every course scan |
 | A non-optional new `Hole` field | Every course file already on disk becomes unreadable |
+| A non-optional new **archive** field | Same failure, one layer up — see `terrainOmitted` (§12.5.1a) |
+| Bumping the archive version for an *added* key | An older build refuses a document it reads perfectly |
+| Remembering the previous roster on New round | Start goes live over names nobody looked at (§14.2a) |
+| A `TextEditor` beside the import buttons | Grows to fit 400 KB and pushes Import off the screen |
+| Reading a picked file without the security scope | A permission error that reads as a corrupt export |
+| Describing terrain's cost as "121 KB of this export" | Contradicts the size row the moment the toggle flips |

@@ -5,9 +5,16 @@
   comes from INFOPLIST_KEY_* build settings and is merged on top of this file.
 
   Both of these fail SILENTLY if missing, which is why they are pinned here:
-    UIBackgroundModes    - without `audio` + `location` the round stops the
-                           instant the screen locks. That is every round, since
-                           the phone lives in a pocket.
+    UIBackgroundModes    - without `location` the track stops the instant the
+                           screen locks. That is every round, since the phone
+                           lives in a pocket, and a log written while it is
+                           locked would then have no position at all.
+                           `audio` is back as of 2026-08-27, with the record
+                           button. It does NOT make the app record in the
+                           background on its own — `AVAudioSession`'s `.record`
+                           category is what grants that — but without it a burst
+                           in progress is killed the moment the screen locks,
+                           which is the pocket, which is most of a round.
     UIFileSharingEnabled - the entire device->Mac transfer story. Without it the
                            session folders are invisible to Finder and Files.
 -->
@@ -15,8 +22,8 @@
 <dict>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>audio</string>
 		<string>location</string>
+		<string>audio</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>

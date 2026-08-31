@@ -41,13 +41,19 @@ public final class RoundSession: @unchecked Sendable {
     /// round is still valid — audio and marks record — it just has no track.
     public private(set) var locationAvailable = false
 
+    /// Whether the microphone is live **right now**, which is not the same claim
+    /// as `recordAudio`. Recording is a toggle the user drives during the round.
+    public private(set) var audioRunning = false
+
     /// - Parameters:
     ///   - auxiliary: extra streams, e.g. `MotionRecorder` on iOS. Passing none
     ///     is a complete, if elevation-blind, round — which is what a Mac run is.
-    /// - Parameter recordAudio: false records a round with GPS, motion and marks
-    ///   but no microphone. Used to exercise the pipeline headlessly, and it is
-    ///   the honest fallback when the user declines mic access rather than
-    ///   refusing to record at all.
+    /// - Parameter recordAudio: whether the microphone starts **with the round**.
+    ///   False is not "this round has no audio" — it is the app's default
+    ///   *(user decision, 2026-08-27)*: recording is off until someone taps the
+    ///   button, and `startAudio()` turns it on mid-round as many times as they
+    ///   like. It is also the honest fallback when the user declines mic access,
+    ///   and what a headless pipeline run uses.
     public init(folder: SessionFolder,
                 audioConfig: AudioRecorder.Config = .init(),
                 locationConfig: LocationRecorder.Config = .init(),
@@ -106,6 +112,11 @@ public final class RoundSession: @unchecked Sendable {
                                            start: SessionClock.now(),
                                            device: Self.defaultDeviceName,
                                            audioFormat: audio.describedFormat)
+        // A round that begins with the microphone off claims no format; the first
+        // burst stamps the real one (`stampAudioMeta`). **`resume()` deliberately
+        // does not come through here** — a reopened round may already hold three
+        // bursts of audio, and rewriting this would make the folder claim it never
+        // recorded. `RoundResumeTests` pins that.
         m.audioFormat = recordAudio ? audio.describedFormat : "none"
         // Written before any stream starts: a round that dies thirty seconds in
         // is still an identifiable session folder rather than orphaned files.
@@ -119,12 +130,8 @@ public final class RoundSession: @unchecked Sendable {
 
         if recordAudio {
             try audio.start()
-            // Only resolved once the audio session is active, so meta is rewritten
-            // here. `meta` must be updated too — stop() rewrites from it, and a
-            // stale copy would erase the route at the end of the round.
-            m.audioRoute = AudioRecorder.currentRoute
-            meta = m
-            try folder.writeMeta(m)
+            audioRunning = true
+            stampAudioMeta()
         }
         locationAvailable = recordLocation ? try location.startTracking() : false
         for r in auxiliary { try r.start() }
@@ -135,7 +142,12 @@ public final class RoundSession: @unchecked Sendable {
         guard state == .recording else { return }
         for r in auxiliary.reversed() { r.stop() }
         if recordLocation { location.stop() }
-        if recordAudio { audio.stop() }
+        // **`audioRunning`, not `recordAudio`.** With a record button the mic can
+        // be live on a round that started without it, and gating the teardown on
+        // the constructor flag would leave the engine running and the last segment
+        // unclosed — an `.m4a` with no index row and no `t1`, after the user
+        // pressed End round.
+        stopAudio()
 
         queue.sync {
             try? markWriter?.close(); markWriter = nil
@@ -176,6 +188,83 @@ public final class RoundSession: @unchecked Sendable {
             markCount += 1
         }
         return m
+    }
+
+    /// Reopen a round that was ended, so more can be recorded into it.
+    ///
+    /// **The round becomes unfinished again, deliberately.** `meta.end` is cleared
+    /// because the round is once more in progress, which is exactly what
+    /// `SessionSummary` should say — and `duration` going nil until it is stopped
+    /// again follows the existing rule that "now minus start" on a round that is
+    /// not running is an invented number.
+    ///
+    /// Nothing is rewritten but `end`: `start` stays as the round began, the marks
+    /// and corrections writers reopen in append mode, and the audio recorder is
+    /// told to number past the segments already on disk.
+    public func resume() throws {
+        guard state != .recording else { return }
+        try folder.create()
+
+        var m = try folder.readMeta()
+        m.end = nil
+        try folder.writeMeta(m)
+        meta = m
+
+        try queue.sync {
+            markWriter = try folder.writer(.marks)
+            correctionWriter = try folder.writer(.corrections)
+        }
+        audio.adoptExistingSegments()
+        locationAvailable = recordLocation ? try location.startTracking() : false
+        for r in auxiliary { try r.start() }
+        state = .recording
+    }
+
+    // MARK: - The microphone, during the round
+
+    /// Start recording audio into a **new segment**, mid-round.
+    ///
+    /// Recording is off by default and the user turns it on *(decision
+    /// 2026-08-27)*, so this is the normal way the microphone ever starts. Each
+    /// call opens the next `audio-NNN.m4a`; `stopAudio()` closes it with a real
+    /// `t1`, and the silence in between is a genuine gap on the session clock
+    /// rather than a hole hidden inside a segment.
+    ///
+    /// Must be called with the app in the foreground — iOS will not let an app
+    /// *begin* recording from the background, only continue. Throws
+    /// `AudioRecorderError.permissionDenied` when the microphone was refused;
+    /// the round carries on regardless, which is the point of it being a toggle.
+    public func startAudio() throws {
+        guard state == .recording, !audioRunning else { return }
+        try audio.start()
+        audioRunning = true
+        stampAudioMeta()
+    }
+
+    /// Stop recording audio without ending the round. Idempotent.
+    public func stopAudio() {
+        guard audioRunning else { return }
+        audio.stop()
+        audioRunning = false
+    }
+
+    /// Record what the microphone actually resolved to.
+    ///
+    /// **Written on the first burst, not at round start.** `start()` stamps
+    /// `"none"` when the round begins with the mic off, which is now the default —
+    /// so a round that recorded three bursts would otherwise claim it never
+    /// recorded at all. `audioRoute` matters more: it is the only thing that
+    /// distinguishes a round with unusable audio from a round that disproves the
+    /// far-field premise, and it resolves only once the session is active.
+    ///
+    /// `meta` is updated as well as the file, because `stop()` rewrites from the
+    /// in-memory copy and a stale one would erase the route at the end of the round.
+    private func stampAudioMeta() {
+        guard var m = meta else { return }
+        m.audioFormat = audio.describedFormat
+        m.audioRoute = AudioRecorder.currentRoute
+        meta = m
+        try? folder.writeMeta(m)
     }
 
     /// Amend the reconstruction. Append-only: the *sequence* of corrections is

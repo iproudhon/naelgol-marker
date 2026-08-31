@@ -11,26 +11,48 @@ public final class JSONLWriter: @unchecked Sendable {
     private let lock = NSLock()
     private var closed = false
 
+    /// Opened **`O_APPEND`**, not seek-to-end, because more than one process
+    /// writes these files.
+    ///
+    /// A Siri App Intent can be invoked while the app is in the foreground, and
+    /// the intent may run in a background-launched instance — two processes, two
+    /// writers, one `log.jsonl`. `seekToEnd()` resolves the offset *once*, so the
+    /// second writer would then overwrite the first from a stale position and the
+    /// file would lose rows silently. `O_APPEND` re-resolves the offset inside
+    /// every `write(2)`, which is the only thing that makes concurrent appends
+    /// well-defined at all.
     public init(url: URL) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: url.deletingLastPathComponent(),
-                               withIntermediateDirectories: true)
-        if !fm.fileExists(atPath: url.path) {
-            fm.createFile(atPath: url.path, contents: nil)
-        }
-        handle = try FileHandle(forWritingTo: url)
-        try handle.seekToEnd()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard fd >= 0 else { throw JSONLError.cannotOpen(url, errno) }
+        // closeOnDealloc: false — `close()` and `deinit` already own the lifetime,
+        // and letting FileHandle close it too is a double close on a descriptor
+        // number the process may by then have reused for something else.
+        handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
         encoder = JSONEncoder()
         // Single line per record is the whole format; sorted keys keep diffs stable.
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     }
 
+    /// One record, one line, one `write(2)`.
+    ///
+    /// The `NSLock` orders writers inside this process; **`flock` orders them
+    /// across processes.** Both are needed and neither substitutes for the other:
+    /// `O_APPEND` guarantees the offset is taken atomically, not that a single
+    /// `write` lands as one contiguous run when a second process is writing to the
+    /// same file. A line torn down the middle by an interleave is the one failure
+    /// `JSONLReader` cannot recover from — it skips a bad *line*, and an interleave
+    /// corrupts two.
     public func append<T: Encodable>(_ value: T) throws {
         var data = try encoder.encode(value)
         data.append(0x0A)
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { throw JSONLError.writerClosed }
+        let fd = handle.fileDescriptor
+        flock(fd, LOCK_EX)
+        defer { flock(fd, LOCK_UN) }
         try handle.write(contentsOf: data)
     }
 
@@ -49,7 +71,8 @@ public final class JSONLWriter: @unchecked Sendable {
         guard !closed else { return }
         closed = true
         try handle.synchronize()
-        try handle.close()
+        // The descriptor was opened by `open(2)` and the handle does not own it.
+        Foundation.close(handle.fileDescriptor)
     }
 
     deinit { try? close() }
@@ -58,6 +81,7 @@ public final class JSONLWriter: @unchecked Sendable {
 public enum JSONLError: Error {
     case writerClosed
     case notAFile(URL)
+    case cannotOpen(URL, Int32)
 }
 
 /// Streams a JSONL file line by line without loading it whole. A 4.5-hour

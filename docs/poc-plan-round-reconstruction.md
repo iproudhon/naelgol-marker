@@ -25,7 +25,7 @@ Net: the PoC's job is to answer **Q12a → Q12 → Q15**, in that order, and not
 
 ### Non-goals — explicitly out of scope
 
-Course data / OSM (§6) · SwiftData round store (§8) · vipl integration and swing-video anchors (§0) · location duty cycling (§5) · App Intents / Siri (§3) · UI polish · multi-round history · privacy/consent UX beyond verbal consent at the tee.
+Course data / OSM (§6) · SwiftData round store (§8) · vipl integration and swing-video anchors (§0) · location duty cycling (§5) · App Intents / Siri (§3 — tried and scrapped 2026-08-27, see TODO.md) · UI polish · multi-round history · privacy/consent UX beyond verbal consent at the tee.
 
 ---
 

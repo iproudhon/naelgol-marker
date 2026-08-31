@@ -19,13 +19,17 @@ let package = Package(
         .library(name: "GolfReconstruction", targets: ["GolfReconstruction"]),
         .library(name: "GolfStore", targets: ["GolfStore"]),
         .library(name: "GolfInsight", targets: ["GolfInsight"]),
+        .library(name: "GolfCourse", targets: ["GolfCourse"]),
+        .library(name: "GolfCourseOSM", targets: ["GolfCourseOSM"]),
+        .library(name: "GolfTerrain", targets: ["GolfTerrain"]),
         .library(name: "GolfMap", targets: ["GolfMap"]),
         .library(name: "GolfEval", targets: ["GolfEval"]),
         .executable(name: "golfctl", targets: ["golfctl"]),
     ],
     dependencies: [
-        // TODO(phase-2): .package(url: "https://github.com/argmaxinc/argmax-oss-swift", from: "1.0.0")
-        //                 -> products WhisperKit, SpeakerKit  (see docs/PLAN.md §3)
+        // WhisperKit — the ASR engine as of 2026-08-27 *(user decision)*. Multilingual
+        // model, task fixed to `.transcribe`, language left nil so it auto-detects.
+        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "1.1.0"),
         // TODO(phase-3): .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0")
     ],
     targets: [
@@ -39,7 +43,9 @@ let package = Package(
         .target(name: "GolfCaptureMotion", dependencies: ["GolfSessionFormat", "GolfCaptureCore"]),
 
         // ASR + diarization behind one protocol. Apple path is @available(iOS 26, macOS 26).
-        .target(name: "GolfTranscription", dependencies: ["GolfSessionFormat"]),
+        .target(name: "GolfTranscription",
+                dependencies: ["GolfSessionFormat",
+                               .product(name: "WhisperKit", package: "WhisperKit")]),
 
         // Minimal /v1/messages client. Knows nothing about golf.
         .target(name: "AnthropicClient"),
@@ -57,19 +63,43 @@ let package = Package(
         // Play suggestion from accumulated history.
         .target(name: "GolfInsight", dependencies: ["GolfSessionFormat", "GolfStore"]),
 
-        // Map + elevation profile rendering.
-        .target(name: "GolfMap", dependencies: ["GolfSessionFormat", "GolfStore"]),
+        // Per-course tee/green/hole geometry, and the distance + bearing math over
+        // it. NOT ground truth — GolfReconstruction may and must read this, since a
+        // shot cannot be placed on a hole without knowing where the hole is.
+        .target(name: "GolfCourse", dependencies: ["GolfSessionFormat"]),
+
+        // Overpass — the query and the socket, and nothing else. Split out from
+        // `golfctl` on 2026-08-30 so the **app** can search and download a course
+        // too: an executable target cannot be imported. Deliberately not folded into
+        // `GolfCourse`, which stays network-free so `OSMCourse`'s assembly is
+        // testable without one.
+        .target(name: "GolfCourseOSM", dependencies: ["GolfCourse"]),
+
+        // USGS 3DEP over the wire, plus the small GeoTIFF reader that decodes it.
+        // Split from `GolfCourse` for the same reason `GolfCourseOSM` is: the grid
+        // type, its sampling and its datum rule stay network-free and testable with
+        // a synthetic raster, and the app can import the fetcher when a course is
+        // downloaded on the phone.
+        .target(name: "GolfTerrain", dependencies: ["GolfCourse"]),
+
+        // Hole view (vector + satellite), map, elevation profile.
+        .target(name: "GolfMap", dependencies: ["GolfSessionFormat", "GolfStore", "GolfCourse"]),
 
         // Reconstruction accuracy metrics vs ground truth.
         .target(name: "GolfEval", dependencies: ["GolfSessionFormat", "GolfReconstruction"]),
 
         .executableTarget(name: "golfctl",
                           dependencies: ["GolfSessionFormat", "GolfCaptureCore",
-                                         "GolfTranscription", "GolfReconstruction",
+                                         "GolfCourse", "GolfCourseOSM", "GolfTerrain",
+                                         "GolfTranscription",
+                                         "AnthropicClient", "GolfReconstruction",
                                          "GolfEval"]),
 
         .testTarget(name: "MarkerTests",
                     dependencies: ["GolfSessionFormat", "GolfCaptureCore",
-                                   "GolfReconstruction"]),
+                                   "GolfCourse", "GolfCourseOSM", "GolfTerrain", "GolfMap",
+                                   "GolfReconstruction",
+                                   "GolfTranscription",
+                                   .product(name: "WhisperKit", package: "WhisperKit")]),
     ]
 )

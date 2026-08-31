@@ -126,4 +126,127 @@ final class RoundSessionTests: XCTestCase {
         XCTAssertEqual(session.state, .ended)
         XCTAssertNotNil(try session.folder.readMeta().end)
     }
+
+    // MARK: - The record button
+
+    /// Recording is off by default and turned on mid-round *(2026-08-27)*, so
+    /// `recordAudio: false` must mean "do not open the microphone **with** the
+    /// round" and not "this round can never record".
+    func testAudioIsNotRunningOnARoundThatStartedWithTheMicrophoneOff() throws {
+        let session = RoundSession.create(under: root, recordAudio: false, recordLocation: false)
+        try session.start()
+        XCTAssertFalse(session.audioRunning)
+        XCTAssertEqual(try session.folder.readMeta().audioFormat, "none",
+                       "no burst has happened yet, and claiming a format would be a lie")
+        session.stop()
+        XCTAssertTrue(session.folder.readAll(.audio, as: AudioSegment.self).isEmpty)
+    }
+
+    /// The button exists on the round screen, which cannot be reached before the
+    /// round starts — but a stale tap must not open the microphone against a
+    /// folder that does not exist yet, or one that is already closed.
+    func testStartAudioDoesNothingOutsideARecordingRound() throws {
+        let session = RoundSession.create(under: root, recordAudio: false, recordLocation: false)
+        XCTAssertNoThrow(try session.startAudio())
+        XCTAssertFalse(session.audioRunning, "the round has not started")
+
+        try session.start()
+        session.stop()
+        XCTAssertNoThrow(try session.startAudio())
+        XCTAssertFalse(session.audioRunning, "the round has ended")
+    }
+
+    /// `stopAudio` is idempotent, and on a round that never recorded it must not
+    /// even reach the recorder — `AudioRecorder.engine` is `lazy` precisely so a
+    /// no-audio round builds no `AVAudioEngine`, and touching it here would
+    /// quietly undo that on every End round.
+    func testStopAudioIsSafeWhenNothingIsRecording() throws {
+        let session = RoundSession.create(under: root, recordAudio: false, recordLocation: false)
+        try session.start()
+        session.stopAudio()
+        session.stopAudio()
+        XCTAssertFalse(session.audioRunning)
+        session.stop()
+        XCTAssertEqual(session.state, .ended)
+    }
+}
+
+/// Reopening an ended round so more can be recorded into it *(user decision,
+/// 2026-08-27)*. A round does not end when the golfer stops talking.
+final class RoundResumeTests: XCTestCase {
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marker-resume-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: root) }
+
+    /// The round is in progress again, and `start` is untouched — it is when the
+    /// round began, not when it was picked back up.
+    func testResumeClearsTheEndAndKeepsTheStart() throws {
+        let session = RoundSession.create(under: root, recordAudio: false, recordLocation: false)
+        try session.start()
+        let start = try session.folder.readMeta().start
+        session.stop()
+        XCTAssertNotNil(try session.folder.readMeta().end)
+
+        try session.resume()
+        XCTAssertEqual(session.state, .recording)
+        let meta = try session.folder.readMeta()
+        XCTAssertNil(meta.end, "a reopened round is in progress again")
+        XCTAssertEqual(meta.start, start, "the round began when it began")
+
+        session.mark(player: "steve")
+        session.stop()
+        XCTAssertEqual(session.folder.readAll(.marks, as: Mark.self).count, 1,
+                       "the marks writer reopens in append mode")
+    }
+
+    /// **The overwrite this exists to prevent.** `segmentIndex` starts at -1 so a
+    /// fresh round opens `audio-000.m4a`; recording into a reopened round without
+    /// adopting what is there would open `audio-000.m4a` again and destroy the
+    /// audio of the round being added to.
+    func testSegmentNumberingContinuesPastWhatIsOnDisk() throws {
+        let folder = SessionFolder(url: root.appendingPathComponent("session-x"))
+        try folder.create()
+        // Two closed segments and a third file with no index row — the crash case,
+        // which the format deliberately allows.
+        let writer = try folder.writer(.audio)
+        try writer.append(AudioSegment(index: 0, file: "audio-000.m4a", t0: 1, t1: 2))
+        try writer.append(AudioSegment(index: 1, file: "audio-001.m4a", t0: 3, t1: 4))
+        try writer.close()
+        FileManager.default.createFile(atPath: folder.audioPath(index: 2).path, contents: Data())
+
+        XCTAssertEqual(folder.lastAudioIndex(), 2,
+                       "an orphaned .m4a counts, or the next burst overwrites it")
+
+        let recorder = AudioRecorder(folder: folder)
+        recorder.adoptExistingSegments()
+        // Next segment must be 3. Asserted through the naming helper rather than
+        // private state, which is what a caller can actually see.
+        XCTAssertEqual(SessionFolder.audioFileName(index: (folder.lastAudioIndex() ?? -1) + 1),
+                       "audio-003.m4a")
+    }
+
+    func testAudioIndexParsesOnlySegmentFiles() {
+        XCTAssertEqual(SessionFolder.audioIndex(inFileName: "audio-007.m4a"), 7)
+        XCTAssertNil(SessionFolder.audioIndex(inFileName: "meta.json"))
+        XCTAssertNil(SessionFolder.audioIndex(inFileName: "audio-.m4a"))
+        XCTAssertNil(SessionFolder.audioIndex(inFileName: "transcript.jsonl"))
+    }
+
+    /// A round that already recorded must not have its format reset to "none" just
+    /// because the reopen starts with the microphone off, as every round does.
+    func testResumeDoesNotDowngradeARecordedFormat() throws {
+        let folder = SessionFolder(url: root.appendingPathComponent("session-y"))
+        try folder.create()
+        try folder.writeMeta(SessionMeta(sessionID: "y", start: 1, end: 2, device: "iOS",
+                                         audioFormat: "m4a-aac-16k-mono-32kbps"))
+        let session = RoundSession(folder: folder, recordAudio: false, recordLocation: false)
+        try session.resume()
+        session.stop()
+        XCTAssertEqual(try folder.readMeta().audioFormat, "m4a-aac-16k-mono-32kbps")
+    }
 }

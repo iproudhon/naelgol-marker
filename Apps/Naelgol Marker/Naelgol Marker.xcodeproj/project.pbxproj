@@ -10,6 +10,12 @@
 		MK0000000000000000020 /* GolfSessionFormat in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000010 /* GolfSessionFormat */; };
 		MK0000000000000000021 /* GolfCaptureCore in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000011 /* GolfCaptureCore */; };
 		MK0000000000000000022 /* GolfCaptureMotion in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000012 /* GolfCaptureMotion */; };
+		MK0000000000000000023 /* GolfCourse in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000013 /* GolfCourse */; };
+		MK0000000000000000024 /* GolfMap in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000014 /* GolfMap */; };
+		MK0000000000000000025 /* GolfReconstruction in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000015 /* GolfReconstruction */; };
+		MK0000000000000000026 /* GolfTranscription in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000016 /* GolfTranscription */; };
+		MK0000000000000000027 /* GolfCourseOSM in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000017 /* GolfCourseOSM */; };
+		MK0000000000000000028 /* GolfTerrain in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000018 /* GolfTerrain */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +38,12 @@
 				MK0000000000000000020 /* GolfSessionFormat in Frameworks */,
 				MK0000000000000000021 /* GolfCaptureCore in Frameworks */,
 				MK0000000000000000022 /* GolfCaptureMotion in Frameworks */,
+				MK0000000000000000023 /* GolfCourse in Frameworks */,
+				MK0000000000000000027 /* GolfCourseOSM in Frameworks */,
+				MK0000000000000000028 /* GolfTerrain in Frameworks */,
+				MK0000000000000000024 /* GolfMap in Frameworks */,
+				MK0000000000000000025 /* GolfReconstruction in Frameworks */,
+				MK0000000000000000026 /* GolfTranscription in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +89,12 @@
 				MK0000000000000000010 /* GolfSessionFormat */,
 				MK0000000000000000011 /* GolfCaptureCore */,
 				MK0000000000000000012 /* GolfCaptureMotion */,
+				MK0000000000000000013 /* GolfCourse */,
+				MK0000000000000000017 /* GolfCourseOSM */,
+				MK0000000000000000018 /* GolfTerrain */,
+				MK0000000000000000014 /* GolfMap */,
+				MK0000000000000000015 /* GolfReconstruction */,
+				MK0000000000000000016 /* GolfTranscription */,
 			);
 			productName = "Naelgol Marker";
 			productReference = DE532142303D008500EFC326 /* Naelgol Marker.app */;
@@ -275,8 +293,9 @@
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Marker keeps recording your round while your phone is in your pocket. Without always-on location the track stops the moment the screen locks.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Marker records where each shot was played so your round can be mapped and measured.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Marker records your group's conversation during a round so it can reconstruct who played which shot. Audio stays on your device.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Marker listens only while you have recording switched on, so it can write down what the group says about each shot. Recording is off until you start it.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Marker uses motion and the barometer to tell walking from standing and to measure how much a hole plays uphill.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Marker turns what the group says into the round's notes. Recognition runs on this iPhone; nothing is sent anywhere.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -313,8 +332,9 @@
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Marker keeps recording your round while your phone is in your pocket. Without always-on location the track stops the moment the screen locks.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Marker records where each shot was played so your round can be mapped and measured.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Marker records your group's conversation during a round so it can reconstruct who played which shot. Audio stays on your device.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Marker listens only while you have recording switched on, so it can write down what the group says about each shot. Recording is off until you start it.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Marker uses motion and the barometer to tell walking from standing and to measure how much a hole plays uphill.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Marker turns what the group says into the round's notes. Recognition runs on this iPhone; nothing is sent anywhere.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -379,6 +399,30 @@
 		MK0000000000000000012 /* GolfCaptureMotion */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GolfCaptureMotion;
+		};
+		MK0000000000000000013 /* GolfCourse */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfCourse;
+		};
+		MK0000000000000000014 /* GolfMap */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfMap;
+		};
+		MK0000000000000000015 /* GolfReconstruction */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfReconstruction;
+		};
+		MK0000000000000000016 /* GolfTranscription */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfTranscription;
+		};
+		MK0000000000000000017 /* GolfCourseOSM */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfCourseOSM;
+		};
+		MK0000000000000000018 /* GolfTerrain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GolfTerrain;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

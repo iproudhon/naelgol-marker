@@ -14,6 +14,11 @@ Sessions/
 .env
 secrets.json
 
+# Course FILES are committable — no voices, no credentials, and a course does not
+# change between rounds. The import cache beside them is not: it is a raw copy of a
+# fetched page plus the model's response, useful locally and noise in the history.
+Courses/.*.import/
+
 # The Xcode project IS tracked; only per-user state is not.
 Apps/**/xcuserdata/
 Apps/**/*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist

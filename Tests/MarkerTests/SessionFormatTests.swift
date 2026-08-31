@@ -174,3 +174,39 @@ final class SessionFormatTests: XCTestCase {
                        "session-2023-11-15-0713")
     }
 }
+
+/// The trailing-slash trap that made a recording burst look like it recorded
+/// nothing *(found on the simulator 2026-08-27)*.
+final class SessionFolderIdentityTests: XCTestCase {
+
+    /// **`URL.appendingPathComponent` consults the filesystem.** It appends a
+    /// trailing slash when the component names an existing directory and does not
+    /// when it does not — so the same path built before and after `create()`
+    /// compares unequal with `==`. `RoundSession.create` builds its URL first and
+    /// the round screen builds the same path later, so the round screen's
+    /// `LogStore.didAppend` guard dropped every refresh: twenty-nine logs on disk
+    /// and "Nothing on this hole" on screen.
+    func testAppendingPathComponentAddsASlashOnceTheDirectoryExists() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marker-url-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let before = root.appendingPathComponent("session-x")
+        try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
+        let after = root.appendingPathComponent("session-x")
+
+        // The trap itself. If this ever stops holding the guard was still wrong to
+        // use `==`, so the assertion below is the one that matters.
+        XCTAssertTrue(SessionFolder.isSame(before, after),
+                      "these name one folder however the URLs were built")
+        XCTAssertTrue(SessionFolder(url: before).isSame(as: after))
+        XCTAssertTrue(SessionFolder(url: after).isSame(as: before))
+    }
+
+    func testDifferentSessionsAreNotSame() {
+        let root = URL(fileURLWithPath: "/tmp/Sessions", isDirectory: true)
+        XCTAssertFalse(SessionFolder.isSame(root.appendingPathComponent("a"),
+                                            root.appendingPathComponent("b")))
+    }
+}

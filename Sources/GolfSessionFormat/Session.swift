@@ -36,7 +36,7 @@ public struct Player: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-public struct SessionMeta: Codable, Sendable {
+public struct SessionMeta: Codable, Sendable, Equatable {
     public var sessionID: String
     public var course: String?
     public var players: [Player]
@@ -105,10 +105,19 @@ public struct Utterance: Codable, Sendable {
     public var speaker: String?        // acoustic cluster id, NOT a name
     public var text: String
     public var conf: Double?
+    /// Which recognizer produced this line, e.g. `"en_US"` or `"ko_KR"`.
+    ///
+    /// **The round is bilingual and two recognizers run over the same audio, so a
+    /// transcript holds two overlapping accounts of every moment.** Without this
+    /// tag they are indistinguishable and the file reads as one recognizer that
+    /// stutters. Optional because a single-locale transcript predates it and
+    /// because a transcriber that does not know its own locale should say nil
+    /// rather than guess.
+    public var locale: String?
     public init(t0: Millis, t1: Millis, speaker: String? = nil,
-                text: String, conf: Double? = nil) {
+                text: String, conf: Double? = nil, locale: String? = nil) {
         self.t0 = t0; self.t1 = t1; self.speaker = speaker
-        self.text = text; self.conf = conf
+        self.text = text; self.conf = conf; self.locale = locale
     }
 }
 
@@ -119,7 +128,7 @@ public struct Utterance: Codable, Sendable {
 /// taking the mic. Each interruption ends a segment and the resume starts a new
 /// one, so there is never a silent gap that a single file-wide offset would
 /// mis-align. This is what keeps "one clock" true for audio.
-public struct AudioSegment: Codable, Sendable {
+public struct AudioSegment: Codable, Sendable, Equatable {
     public var index: Int
     /// File name inside the session folder, e.g. "audio-000.m4a".
     public var file: String

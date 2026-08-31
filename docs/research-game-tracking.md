@@ -103,6 +103,13 @@ Do not guess at milliamps. Measure — see §9. Full location strategy is §5.
 
 Given G2 and G3, the naive design is impossible and the brute-force design (hold a foreground audio session for 4.5 hours) is both a battery disaster and a review risk. The way out is to notice that **iOS already runs an always-on, wake-word speech engine at zero marginal cost to your app.**
 
+> **Tried and scrapped, 2026-08-27.** This section's recommendation was implemented in full and
+> deleted the same day. Two turns per sentence (an `AppShortcut` phrase cannot carry free text,
+> so the closed-vocabulary `AppEnum` idea below does not survive contact with a whole spoken
+> sentence), Siri transcribes in the system Siri language only — which fails the bilingual
+> requirement outright — and it is a black box with no way to feed it the roster or A/B it.
+> Question 4 below is therefore answered "yes, and it does not matter". TODO.md has the defects.
+
 **Recommended primary path — App Intents + Siri.** "Hey Siri, log a seven iron." An `AppIntent` with `openAppWhenRun = false` executes in a lightweight extension **without foregrounding the app**, receives the parsed parameter, and appends to the round store. The always-on listening is the system's, already running for every user; your app pays nothing for it. An `AppShortcutsProvider` supplies the natural-language phrases; enumerated parameter types (`AppEnum` over the 14 club names, over player names) give the recognizer a closed vocabulary, which is exactly what noisy outdoor speech needs.
 
 Caveats worth designing around: `perform()` may run in an extension where app state is not loaded, so it must bootstrap its own store access; and Siri invocation is a deliberate user action, not passive capture.
@@ -285,11 +292,33 @@ Required either way:
 
 Mapping GPS → hole → shot sequence needs tee, green, and ideally fairway geometry. Three sources:
 
-1. **OpenStreetMap.** Genuinely well-suited: `golf=hole` is tagged as a **line from tee to green** carrying `ref` (hole number) and `par`, with node count = par − 1, plus `golf=green`, `golf=tee`, `golf=fairway`, `golf=bunker` polygons. Free, no API key, and the schema is almost exactly the model you'd design. **Coverage is the open question** — it varies enormously by region and is the thing to measure (§9, Q6) before committing.
+1. **OpenStreetMap.** Genuinely well-suited: `golf=hole` is tagged as a **line from tee to green** carrying `ref` (hole number) and `par`, with node count = par − 1, plus `golf=green`, `golf=tee`, `golf=fairway`, `golf=bunker` polygons. Free, no API key, and the schema is almost exactly the model you'd design. **Coverage was the open question. It has now been measured, and the answer is no** — see the correction below.
 2. **Commercial course APIs.** Complete and maintained; licensing and per-round cost.
-3. **User-walked course.** The app records tee/green as the user plays hole 1 the first time, and improves with each round. Zero dependency, poor first-round experience — but it composes well as a *fallback* behind OSM.
+3. **User-walked course.** The app records tee/green as the user plays hole 1 the first time, and improves with each round. Zero dependency, poor first-round experience — ~~but it composes well as a *fallback* behind OSM~~ **and it is now the primary source, not the fallback.** The first-round experience is also better than assumed: geometry is derived from the track *afterwards* and reconstruction re-runs over the cached session, so nothing is lost on the first visit.
 
-**Recommendation:** OSM as primary, user-walked as automatic fallback and correction layer. Cache course geometry locally; a course does not change between rounds.
+~~**Recommendation:** OSM as primary, user-walked as automatic fallback and correction layer.~~
+
+> **Superseded 2026-08-24 — the ordering inverts. See [`research-course-map.md`](./research-course-map.md).**
+>
+> Coverage was measured rather than assumed. Of **928** mapped South Korean golf courses, only
+> **28** carry ≥9 holes of `golf=hole` geometry and **54** carry ≥9 `golf=green` polygons —
+> roughly **3% and 6%**. OSM is a free head start on the ~3% of courses where it exists, and
+> nothing to plan around.
+>
+> **New recommendation: derive geometry from our own recorded GPS track** — green centre from the
+> stationary cluster at the pin, tee from the cluster preceding a long displacement — with OSM
+> taken opportunistically, imagery tracing for a course you want ready before the first visit,
+> and a MARK-button survey as the deliberate fallback and correction layer. A first round on an
+> unmapped course is not degraded: it records normally, geometry is derived afterwards, and
+> reconstruction re-runs over the same cached session.
+
+Cache course geometry locally; a course does not change between rounds. Geometry belongs in a
+per-course file outside `Sessions/`, and unlike a session it is committable — it contains no
+voices and no credentials.
+
+A fourth source, not considered when this was written: **imagery tracing**, which is minutes per
+course. Note that *which* imagery is a legal choice — Google's and Apple's terms both forbid using
+their data to build another mapping service, and a course file is one.
 
 ### Reconstruction — and the multi-player fork
 
@@ -522,6 +551,7 @@ Either way: a clear in-app disclosure and an off switch. One sentence in the UI;
 - [Getting Started With App Intents](https://useyourloaf.com/blog/getting-started-with-app-intents/) — `openAppWhenRun = false`, extension execution context
 - [MetricKit `MXLocationActivityMetric`](https://developer.apple.com/documentation/metrickit/mxlocationactivitymetric) — per-accuracy-tier cumulative time
 - [OSM `Tag:golf=hole`](https://wiki.openstreetmap.org/wiki/Tag:golf=hole) · [`golf=fairway`](https://wiki.openstreetmap.org/wiki/Tag:golf=fairway) · [`leisure=golf_course`](https://wiki.openstreetmap.org/wiki/Tag:leisure=golf_course)
+- [`research-course-map.md`](./research-course-map.md) — measured OSM golf coverage in Korea, course-file format, imagery licensing, and the hole-view rendering math. Supersedes §6's source ranking
 - [Claude Haiku 4.5 / Sonnet 5 / Opus 5 pricing & context](https://docs.claude.com/en/docs/about-claude/pricing) · [Message Batches](https://docs.claude.com/en/docs/build-with-claude/batch-processing) (50% cost) · [Structured outputs](https://docs.claude.com/en/docs/build-with-claude/structured-outputs) — §7 model math
 - [`SpeechTranscriber`](https://developer.apple.com/documentation/speech/speechtranscriber) — diarization support is Q12
 - [TN3193: Managing the on-device foundation model's context window](https://developer.apple.com/documentation/technotes/tn3193-managing-the-on-device-foundation-models-context-window) — the 4,096-token ceiling that rules out on-device inference for §7

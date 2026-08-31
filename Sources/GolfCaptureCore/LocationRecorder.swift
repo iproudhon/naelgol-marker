@@ -10,18 +10,40 @@ import GolfSessionFormat
 /// from `allowsBackgroundLocationUpdates` plus the `location` background mode;
 /// `CLBackgroundActivitySession` is gated separately below.
 ///
-/// Duty cycling (PLAN §5 — motion-gated GPS, 3–7× less receiver time) is
-/// deliberately *not* here yet. Phase 1 records continuously so there is an
-/// honest baseline to measure the saving against.
+/// **The recorded track is duty-cycled too** *(user decision, 2026-08-26, TODO 16;
+/// implemented 2026-08-27)*. It used to run at `kCLLocationAccuracyBest` for the
+/// whole round so PLAN §5 would have an honest full-rate baseline to measure a
+/// saving against. That baseline round is not going to be collected, so **the
+/// saving here is an estimate and must never be quoted as a measurement** — there
+/// is no before-number and there never will be.
+///
+/// A round therefore tracks **slow** by default and goes **fast** only where dense
+/// positions are actually worth their power: while a hole view is open, and for the
+/// convergence window right after a recording burst, which is where the shots are.
+/// The visible cost is that `gps.jsonl` is now too coarse between those moments to
+/// derive course geometry from — the track is dense around bursts and sparse in
+/// between, on purpose, and someone will eventually wonder why.
 public final class LocationRecorder: NSObject, @unchecked Sendable {
 
     public struct Config: Sendable {
+        /// Fast mode — what the hole view and a just-recorded log need.
         public var accuracy: CLLocationAccuracy = kCLLocationAccuracyBest
         /// Metres. 0 would flood the log while standing on a tee.
         public var distanceFilter: CLLocationDistance = 1
+        /// Slow mode. Coarse enough to say which hole, cheap enough to leave on
+        /// for four and a half hours.
+        public var slowAccuracy: CLLocationAccuracy = kCLLocationAccuracyNearestTenMeters
+        public var slowDistanceFilter: CLLocationDistance = 25
         /// Drop fixes worse than this; a 100 m fix is worse than no fix when the
         /// question is which side of a fairway someone stood on.
+        ///
+        /// **Unchanged by the mode.** A slow fix is a cheaper *request*, not a
+        /// licence to write a worse *answer* — the reason a 100 m fix is useless
+        /// has nothing to do with how it was asked for.
         public var maxHorizontalAccuracy: CLLocationAccuracy = 50
+        /// Where a round starts. Slow: a golfer walking to the first tee is not
+        /// doing anything a metre of precision would record.
+        public var startMode: TrackingMode = .slow
         public init() {}
     }
 
@@ -32,6 +54,9 @@ public final class LocationRecorder: NSObject, @unchecked Sendable {
     private var writer: JSONLWriter?
 
     public private(set) var lastFix: GPSFix?
+    /// What the radio is being asked for. `.off` only before `startTracking` and
+    /// after `stop`.
+    public private(set) var mode: TrackingMode = .off
     public private(set) var rejectedForAccuracy = 0
     public var onFix: (@Sendable (GPSFix) -> Void)?
     public var onAuthorizationChange: (@Sendable (CLAuthorizationStatus) -> Void)?
@@ -41,8 +66,31 @@ public final class LocationRecorder: NSObject, @unchecked Sendable {
         self.config = config
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = config.accuracy
-        manager.distanceFilter = config.distanceFilter
+        manager.desiredAccuracy = config.slowAccuracy
+        manager.distanceFilter = config.slowDistanceFilter
+    }
+
+    /// Change what the radio is being asked for, without interrupting the track.
+    ///
+    /// **Never `.off` here.** A round with the microphone shut still has to know
+    /// roughly where it is — that is what puts a hole number on a log — and there
+    /// is no state in which stopping the track while the round runs is right.
+    /// `stop()` is how a round's track ends.
+    public func setMode(_ next: TrackingMode) {
+        guard next != .off, next != mode, mode != .off else { return }
+        mode = next
+        apply(next)
+    }
+
+    private func apply(_ next: TrackingMode) {
+        switch next {
+        case .fast:
+            manager.desiredAccuracy = config.accuracy
+            manager.distanceFilter = config.distanceFilter
+        case .slow, .off:
+            manager.desiredAccuracy = config.slowAccuracy
+            manager.distanceFilter = config.slowDistanceFilter
+        }
     }
 
     public var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
@@ -96,11 +144,14 @@ public final class LocationRecorder: NSObject, @unchecked Sendable {
         manager.pausesLocationUpdatesAutomatically = false   // a golfer stands still a lot
         manager.activityType = .fitness
         #endif
+        mode = config.startMode == .off ? .slow : config.startMode
+        apply(mode)
         manager.startUpdatingLocation()
         return true
     }
 
     public func stop() {
+        mode = .off
         manager.stopUpdatingLocation()
         queue.sync {
             try? writer?.close()

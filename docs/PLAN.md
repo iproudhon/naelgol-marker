@@ -4,9 +4,24 @@ Date: 2026-08-24 · Status: pre-alpha, nothing implemented
 
 Golf round tracking and replay from **audio + GPS**, for the whole group.
 
-Foundation: [`research-game-tracking.md`](./research-game-tracking.md) (feasibility) and
+Foundation: [`research-game-tracking.md`](./research-game-tracking.md) (feasibility),
 [`poc-plan-round-reconstruction.md`](./poc-plan-round-reconstruction.md) (the PoC that gates
-everything). This document is the product and architecture layer over both.
+everything), [`research-course-map.md`](./research-course-map.md) (course geometry and the
+hole view — P3), and [`research-scorecard-import.md`](./research-scorecard-import.md) (where a
+course's card comes from, measured against 250 US and 244 Korean course websites). This document is
+the product and architecture layer over all four.
+
+**The app listens. That was briefly not true and is again** *(2026-08-27)*. For one day the
+input path was Siri dictation plus on-device Apple Intelligence, and both were scrapped after a
+device run: Siri is two turns and single-language, `FoundationModels` has ~4k of context, takes
+no images, and generated garbage on real input. TODO.md records the defects. Nothing in this
+document was written for that detour, so nothing here is retracted — but the consequence is that
+**which live recogniser runs on the phone is now an open decision**, not a settled one
+(research-live-transcription.md; §6 Phase 2).
+
+**Target market: mainly American courses** *(2026-08-26)*. That flips the geometry default —
+OSM covers ~half of US courses and ~3% of Korean ones — and fixes the distance-unit assumption to
+yards. See research-course-map.md §2.1 and research-scorecard-import.md §3.1.
 
 ---
 
@@ -33,13 +48,15 @@ metric the whole product lives or dies on.
 |---|---|---|---|
 | **P1** | **Capture, reconstruct, correct** | Record audio + GPS + motion + altitude for a round; reconstruct a shot-by-shot draft for all players; the user amends it | Nothing — no longer gated (§3) |
 | **P2** | **Record & replay** | Past rounds and past holes, persisted; scrub a round back on a timeline | P1 |
-| **P3** | **Map with elevation** | The round on a map, per-hole elevation profile, tee→green delta | Capture only — **independently useful, ships without P1** |
+| **P3** | **Map with elevation** | The round on a map, per-hole elevation profile, tee→green delta | Capture + a course file. A course arrives in **two halves from two sources**: the card (import) and the coordinates (OSM in the US, track/survey/editor elsewhere) — **independently useful, ships without P1** |
 | **P4** | **Play suggestion** | "From here, on this hole, at this elevation delta — here's what you've done before" | P2 + several rounds of history |
 
 ### Sequencing consequence
 
 **P3 does not depend on reconstruction.** A map with real elevation is useful the first time you
-walk a hole, and it needs nothing but the capture layer. If reconstruction turns out weak (§3), P3 and a correction-driven
+walk a hole, and it needs nothing but the capture layer plus per-hole geometry — which
+[`research-course-map.md`](./research-course-map.md) shows is derivable from the track capture
+already produces, not bought or downloaded. If reconstruction turns out weak (§3), P3 and a correction-driven
 manual-entry P2 still make a real app. Build P3 early for that reason, not last.
 
 P4 is honest only with history. Cold start is **silence**, not generic advice — every golf app
@@ -94,7 +111,7 @@ One Swift package, thin app and CLI shells over it. Nothing interesting lives in
    │ GolfCaptureCore   audio, GPS │  AirDrop /    │ GolfTranscription  ASR + diar │
    │ GolfCaptureMotion motion, alt│  Files.app    │ GolfReconstruction bundle→LLM │
    │ GolfStore         history    │ ────────────▶ │ GolfEval           metrics    │
-   │ GolfMap           map+relief │   session/    │ golfctl            the CLI    │
+   │ GolfMap           hole view  │   session/    │ golfctl            the CLI    │
    │ GolfInsight       suggestion │               └──────────────────────────────┘
    └──────────────────────────────┘
               └── GolfSessionFormat: the contract both sides speak ──┘
@@ -124,6 +141,7 @@ Apple path stays `@available(iOS 26, macOS 26)` so the package floor can remain 
 | `GolfReconstruction` | iOS 16 / macOS 13 | Pure data + HTTP |
 | `GolfStore` | iOS 17 | SwiftData |
 | `GolfInsight`, `GolfMap`, `GolfEval` | iOS 16–17 | Pure data / MapKit |
+| `GolfCourse` | iOS 16 / macOS 13 | Per-course card **and** geometry, and the math over them. Codable only. **Not ground truth** — `GolfReconstruction` may and must read it. A hole may carry either half alone; `hasGeometry` gates the geometric API |
 
 ### Boundaries enforced in types, not discipline
 
@@ -138,6 +156,11 @@ Apple path stays `@available(iOS 26, macOS 26)` so the package floor can remain 
   silently invalidate every accuracy number.
 - **`Transcriber` is a protocol**, so the ASR A/B is `golfctl --asr apple|whisperkit`, not a branch.
 - **`AnthropicClient` knows nothing about golf** — model config, messages, JSON schema.
+- **Course geometry is the one thing that crosses the firewall in the other direction.** A
+  reconstruction cannot place shots on a hole without knowing where the hole is, so
+  `Courses/<id>.json` is an *input*. When that geometry was surveyed with the MARK button it must
+  be **exported** into a course file first — `GolfReconstruction` reads the course file, never a
+  session's `marks.jsonl`. See [`research-course-map.md`](./research-course-map.md) §2.5.
 
 ### Iteration cost
 
@@ -173,6 +196,11 @@ baseline; and store the raw samples, since the correction strategy will change.
 **Playing distance** = horizontal distance adjusted for elevation delta — that is the number a
 golfer actually wants, and it is the smallest genuinely useful thing Marker can ship.
 
+**In Korea the barometer is not merely better, it is the only source.** The February 2026 approval
+that finally let Google export Korean map data **excludes contour data entirely**, so no foreign
+map provider supplies Korean elevation at any price
+([`research-course-map.md`](./research-course-map.md) §3.2). Marker measures it on the phone.
+
 ---
 
 ## 6. Roadmap
@@ -181,11 +209,11 @@ golfer actually wants, and it is the smallest genuinely useful thing Marker can 
 |---|---|---|
 | **0** | Far-field capture measurement — **no code, no longer a gate** (§3) | Informs prompt + hardware strategy; blocks nothing |
 | **1** | `GolfSessionFormat` writers + `GolfCaptureCore` + `GolfCaptureMotion` + iOS 26 app shell (MARK button first) | **Session folder round-trips device→Mac** |
-| **2** | `GolfTranscription` — Apple vs WhisperKit+SpeakerKit A/B | No usable speaker clusters → reassess P1 |
+| **2** | `GolfTranscription` — which recogniser runs **live on the phone**. Apple `SpeechAnalyzer` with one `SpeechTranscriber` per locale is built and verified on macOS (`golfctl record --live`, bilingual, 43× realtime); WhisperKit and others are measured against that, not assumed better | **A live bilingual transcript on a real iPhone, at a battery cost a 4.5-hour round survives.** Speaker clustering is no longer part of it — diarization was cut by decision 2026-08-26; attribution is content-only |
 | **3** | `AnthropicClient` + `GolfReconstruction` | — |
 | **4** | `GolfEval`, built alongside 3 | **Attribution accuracy decides P1 go/no-go** |
 | **5** | `GolfStore` — rounds, holes, shots persisted (**P2**) | — |
-| **6** | `GolfMap` — map + elevation profile + replay scrubber (**P3**) | Can start any time after Phase 1 |
+| **6** | `GolfMap` — hole view + elevation profile + replay scrubber (**P3**), over a `GolfCourse` file whose card is imported and whose coordinates are placed or derived | **Started 2026-08-25.** Built and verified: `GolfCourse` (card + geometry), the two-layer hole view, `CourseEditorView` tap-to-place, `AnthropicClient`, `golfctl course import`. Still open: geometry derived from a real track, `survey export`, elevation profile, replay — and the import's model leg has never run against the live API |
 | **7** | `GolfInsight` — suggestion from history (**P4**) | Needs ≥5 rounds of one player's history |
 
 ~2.5 weeks of coding for Phases 1–4; **data collection is the schedule driver**, so start
@@ -205,13 +233,23 @@ capture pipeline is developed and tested on a Mac via `golfctl record` before an
 Carried from [`research-game-tracking.md`](./research-game-tracking.md) §10, in priority order:
 
 1. **Q12a** far-field capture rate per non-holder player — **no longer a gate** (§3); shapes how hard the prompt leans on derivation, and whether per-player devices or a Watch mic are worth it.
-2. **Q12** does iOS 26 `SpeechTranscriber` actually diarize, or is SpeakerKit the only path?
+2. ~~**Q12** does iOS 26 `SpeechTranscriber` actually diarize, or is SpeakerKit the only path?~~
+   **Closed by decision, not measurement** *(user, 2026-08-26)*: diarization is not needed and
+   attribution is content-only. `Utterance.speaker` stays nil. What replaces it as the open
+   question is **which live recogniser goes back into the app** (§6 Phase 2) and what it costs
+   over 4.5 hours — the one thing no measurement here has yet covered.
 3. **Q15** reconstruction accuracy on 5–10 real rounds, split by metric; attribution is decisive.
 4. **Q14** is Private Cloud Compute developer-accessible, and does its 32K context hold? Would
    dissolve both the API-key problem and most of the privacy exposure.
 5. **G3 / API key** — deferred while this is a dev build (PoC plan §0), both re-open at ship time.
 6. Barometric drift over 4.5 hours, and the per-hole re-anchoring strategy (§5).
-7. Course geometry: OSM `golf=hole` coverage for real courses, vs. user-walked fallback.
+7. ~~Course geometry: OSM `golf=hole` coverage for real courses, vs. user-walked fallback.~~
+   **Resolved 2026-08-24 by measurement.** Of 928 mapped South Korean courses, **28 have ≥9 holes**
+   of `golf=hole` geometry (~3%); 54 have ≥9 greens (~6%). OSM is not a source to plan around in
+   Korea. Geometry comes from our own GPS track, with OSM taken opportunistically and a MARK-button
+   survey as fallback — [`research-course-map.md`](./research-course-map.md) §2. What replaces it as
+   an unknown: how accurate a track-derived green centre is after one round (C1), and whether hole
+   geometry measurably improves reconstruction accuracy (C5).
 
 ---
 

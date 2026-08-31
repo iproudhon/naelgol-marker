@@ -1,29 +1,22 @@
 import SwiftUI
 import GolfSessionFormat
 import GolfCaptureCore
-
-/// One screen. Start a round, MARK while it runs, stop. Everything else is
-/// Phase 2+ and off-device.
-struct RoundView: View {
-    @ObservedObject var model: RoundViewModel
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if model.isRecording { RecordingView(model: model) } else { SetupView(model: model) }
-            }
-        }
-    }
-}
+import GolfCourse
 
 // MARK: - Before the round
 
+/// Setting a round up, reached from the rounds list.
+///
 /// A `Form` rather than a hand-rolled `VStack`: it scrolls, it insets for the
 /// keyboard, and it keeps the title out of the fields' way. The hand-rolled
 /// version squeezed its content when the keyboard appeared and the large
 /// navigation title landed on top of the players field.
-private struct SetupView: View {
+struct NewRoundView: View {
     @ObservedObject var model: RoundViewModel
+    @StateObject private var library = CourseLibrary()
+    @State private var finding = false
+    /// Called with the new session's folder name once recording has started.
+    var onStarted: (String) -> Void
 
     private enum Field { case course }
     @FocusState private var focus: Field?
@@ -61,11 +54,45 @@ private struct SetupView: View {
                    + "names, so a player called only by a nickname is still attributable.")
             }
 
-            Section("Course") {
-                TextField("Naelgol CC", text: $model.courseText)
-                    .focused($focus, equals: .course)
-                    .submitLabel(.done)
-                    .onSubmit { focus = nil }
+            Section {
+                if library.courses.isEmpty {
+                    // A course file is what the hole view draws from, and a fresh
+                    // install has none. Typing a name still starts a round — the
+                    // capture layer needs no geometry (PLAN §2).
+                    TextField("Course name", text: $model.courseText)
+                        .focused($focus, equals: .course)
+                        .submitLabel(.done)
+                        .onSubmit { focus = nil }
+                    // **The finder belongs here too.** This is where somebody
+                    // starting a round discovers they have no course, and the hole
+                    // view — the other way in — is reached *through* a round.
+                    Button("Find a course…") { finding = true }
+                    Button("Install sample course") { library.installSample() }
+                } else {
+                    Picker("Course", selection: Binding(
+                        get: { library.selectedID ?? "" },
+                        set: { library.selectedID = $0.isEmpty ? nil : $0 })) {
+                        ForEach(library.courses) { c in Text(c.name).tag(c.id) }
+                    }
+                    // **"Find a course" where "Not listed" used to be** *(user,
+                    // 2026-08-30)*. "Not listed" was a dead end that only revealed a
+                    // text box; the actionable version of "my course is not here" is
+                    // to go and get it. The free-text name still exists for a course
+                    // nobody has mapped — it is the `library.courses.isEmpty` branch
+                    // above, and the round records fine either way.
+                    Button("Find a course…") { finding = true }
+                    if library.selectedID == nil {
+                        TextField("Course name", text: $model.courseText)
+                            .focused($focus, equals: .course)
+                            .submitLabel(.done)
+                            .onSubmit { focus = nil }
+                    }
+                }
+            } header: {
+                Text("Course")
+            } footer: {
+                Text("Course files live in Documents/Courses and can be dropped in over "
+                   + "Finder or the Files app. A round records fine without one.")
             }
 
             Section {
@@ -79,7 +106,7 @@ private struct SetupView: View {
                         focus = nil
                         Task { await model.requestAllPermissions() }
                     } label: {
-                        Label("Allow microphone and location", systemImage: "hand.raised.fill")
+                        Label("Allow location", systemImage: "hand.raised.fill")
                     }
                 }
             } header: {
@@ -96,7 +123,11 @@ private struct SetupView: View {
             Section {
                 Button {
                     focus = nil
-                    Task { await model.startRound() }
+                    if let course = library.selected { model.courseText = course.name }
+                    Task {
+                        await model.startRound()
+                        if let id = model.sessionName, model.isRecording { onStarted(id) }
+                    }
                 } label: {
                     Text("Start round")
                         .font(.headline)
@@ -105,6 +136,12 @@ private struct SetupView: View {
                 .disabled(!model.canStart)
             } footer: {
                 Text("Start with the app open — iOS will not let a recording begin in the background.")
+            }
+        }
+        .sheet(isPresented: $finding) {
+            CourseFinder(here: model.here,
+                         existingIDs: Set(library.courses.map(\.id))) { course in
+                library.save(course)
             }
         }
         .navigationTitle("New round")
@@ -183,96 +220,5 @@ private struct CapabilityRow: View {
         case .denied: return .red
         case .unavailable: return .secondary
         }
-    }
-}
-
-// MARK: - During the round
-
-private struct RecordingView: View {
-    @ObservedObject var model: RoundViewModel
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ForEach(model.players) { player in
-                    Button {
-                        model.mark(player: player.id)
-                    } label: {
-                        Text(player.name)
-                            .font(.title3.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 64)
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                if let last = model.lastMarkLabel {
-                    Text(last).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                status
-            }
-            .padding()
-        }
-        .navigationTitle(timeString(model.elapsed))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 6) {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                        .opacity(model.audioState == .recording ? 1 : 0.25)
-                    Text("\(model.markCount)").monospacedDigit()
-                }
-                .font(.footnote)
-            }
-        }
-        // Pinned, so ending a round never means hunting for the button.
-        .safeAreaInset(edge: .bottom) {
-            Button(role: .destructive) {
-                model.stopRound()
-            } label: {
-                Text("End round").frame(maxWidth: .infinity, minHeight: 46)
-            }
-            .buttonStyle(.borderedProminent)
-            .padding()
-            .background(.bar)
-        }
-    }
-
-    private var status: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            row("Audio", audioLabel)
-            row("GPS", model.fixAccuracy.map { String(format: "±%.0f m · %d fixes", $0, model.fixCount) }
-                      ?? "waiting for a fix")
-            row("Motion", model.activity)
-            row("Elevation", String(format: "%+.1f m since start", model.relativeAltitude))
-            if let name = model.sessionName { row("Session", name) }
-        }
-        .font(.footnote)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary).frame(width: 74, alignment: .leading)
-            Text(value).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var audioLabel: String {
-        switch model.audioState {
-        case .recording: return "recording"
-        case .interrupted: return "interrupted — will resume"
-        case .stopped: return "stopped"
-        case .idle: return "idle"
-        }
-    }
-
-    private func timeString(_ t: TimeInterval) -> String {
-        let s = Int(t)
-        return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
     }
 }

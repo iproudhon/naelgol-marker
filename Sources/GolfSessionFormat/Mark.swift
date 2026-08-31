@@ -33,7 +33,7 @@ public struct Mark: Codable, Sendable {
     }
 }
 
-public struct Scorecard: Codable, Sendable {
+public struct Scorecard: Codable, Sendable, Equatable {
     /// player -> hole -> strokes
     public var strokes: [String: [Int: Int]]
     public init(strokes: [String: [Int: Int]]) { self.strokes = strokes }

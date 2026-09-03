@@ -15,6 +15,8 @@ history. Moved out of TODO.md on 2026-08-28, verbatim.
 research), the two-tier extraction split and why only the authoritative tier is scored,
 the `Correction`-firewall argument that put `Event.provenance` in the format on day one,
 and the F1 argument for why a `LogEntry` is not an `Utterance`.
+The **Retired CLAUDE.md invariants** section at the end is a separate appendix, added
+2026-08-31: the rules that were reversed or superseded, kept verbatim.
 
 ---
 
@@ -654,3 +656,150 @@ decides whether P1 is a product at all, and it is last because it needs recorded
 rounds — **which is the real schedule driver: start recording real rounds as soon as
 E2 lands, imperfect captures included.**
 
+
+---
+
+## Retired CLAUDE.md invariants — moved 2026-08-31
+
+CLAUDE.md was compacted on 2026-08-31. These are the bullets that carried a struck-through
+(`~~…~~`) claim — a rule that was reversed, voided, superseded or closed — copied here verbatim
+as they stood before the compaction. **Every one of them is history.** Where a *finding* inside
+one of these still constrains the code (the three failed z-order mechanisms, the fixed-threshold
+VAD, the greedy split chain, `out tags geom`), that finding was kept in CLAUDE.md and CLAUDE.md
+is the authority. Nothing here is guidance.
+
+- **~~An untagged `golf=tee` polygon is dropped, not named "tee".~~ Reversed by the user on
+  2026-08-30 — untagged tees are now adopted everywhere.** The rule was written when the cost
+  looked like 11 of Corica's 100 polygons; at Coyote Creek it is **107 of 112, and 16 of 18 holes
+  with no tee at all**, which is the hole view falling back to a centre line on a course OSM
+  describes perfectly well. What survives is everything that kept a *phantom* tee out, and it is
+  still load-bearing: a practice-named polygon is refused, a polygon inside a `golf=driving_range`
+  is refused (`OSMCourse.inside`), `Reach.tee` still applies, and the name is marked
+  **`TeeBox.inferredName`** all the way to the screen, where the hole box prints `~ White Tee` —
+  the same mark an inferred tee *position* and a measured stand-in yardage get, and for the same
+  reason: a different quantity, not a substitute. A *named* green ("Practice Putting Green") is
+  still never a hole's green.
+- **~~The live feed is duty-cycled; the recorded track is not.~~ Voided by the user
+  on 2026-08-26** — the recorded track is duty-cycled too, from the start (TODO item
+  16, plan D3). PLAN §5's full-rate baseline round will not be collected, so **the
+  3–7× saving is permanently unmeasurable against a real before-number**: state it as
+  an estimate wherever it is claimed, never as a measurement. `LocationRecorder` runs
+  slow by default during a round and fast while a hole view is open; `LiveLocation`
+  is unchanged.
+- **~~Whisper is the wrong engine for this product.~~ Overruled by the user on
+  2026-08-27; WhisperKit is now the engine.** The objections were real and two of
+  the three still stand — one language token per 30-second window, and weak
+  code-switching (HiKE: Whisper-Small 48.1% PIER at Korean-English switch points).
+  **The third was the decisive one and it turned out to be a setting, not the
+  model**: "it translates the minority language" is what `task = .transcribe`
+  forbids, and that only takes effect through `usePrefillPrompt` — see the
+  invariant below. Parakeet is still out on no Korean. Verified on real audio
+  2026-08-27: Korean in, Korean out; English in, English out; language detected per
+  phrase and never specified. What we give up versus the Apple path is the
+  two-recognizers-over-one-audio arrangement, and with it any handling of a
+  sentence that switches language mid-way.
+- **~~Sending in Type mode ends the marker~~ — the send button is gone**
+  *(user, 2026-08-28: "no send button (up arrow)")*. There were two ways to commit
+  one sentence sitting a centimetre apart and behaving differently: the arrow refused
+  an empty box, OK did not. OK is the only one now, and it still ends the marker, so
+  the *effect* survives — what went is the second path to it. The dismiss branch went
+  with the button: `send()`'s `if mode == .type { dismiss() }` had no caller left but
+  `finish()`, which dismisses anyway, and a second dismiss path is how two buttons
+  come to mean subtly different things. **Return is a return** — it was
+  `.submitLabel(.send)` with `.onSubmit(send)`, so the key that looks like a newline
+  on a three-line box filed the entry and closed the sheet.
+- **~~"Find a course…" is on three screens, and the hole view is the one that matters
+  least.~~** The hole view is reached *through* a course, so putting the finder only
+  there would make it unreachable on the install that needs it — a fresh one with no
+  course files. It is also in `RoundView`'s course section, which is where somebody
+  starting a round discovers they have none, and in `RoundScreen`'s Round menu.
+- **~~The simulated position is an overlay above the map, not an annotation in it.~~
+  Reverted by the user the same day — see the two bullets below.** *(It was written
+  for "I still can't pick and drag it when it's overlapped with markers", 2026-08-29:
+  every marker on satellite carries its own gesture on a large transparent grab strip,
+  and MapKit decides annotation stacking for itself, so `SatelliteHoleView
+  .simulatedOverlay` put the marker in the `ZStack` above the whole map through
+  `MapProxy.convert`. `simulatedOverlay` no longer exists.)* The reason it lost is
+  worth keeping and is stated below: outside the map's content the marker stops being
+  glued to the ground. A **real** fix was and still is an ordinary annotation —
+  nothing drags it, so nothing can take its touch.
+- **~~The position and the flag are re-added whenever the marker set changes.~~
+  ~~While simulating, a pill within reach stands down.~~ Both reverted by the user on
+  2026-08-30: "revert simulate marker z-order changes you just made" — and the answer
+  to which, when asked, was "all of it".** `stackToken`, `promotion`,
+  `yieldingMarkers` and `MarkerDisplay.stoodDown` are gone; the player and the flag
+  are plain annotations again, in that order, flag last. **The findings survive the
+  revert and are the reason not to try a fourth time without something new:**
+  `_MapKit_SwiftUI` has **no z-order API for an `Annotation`** (checked against the
+  iOS 26.5 interface — `mapOverlayLevel` exists and applies to
+  `MapPolygon`/`MapPolyline` only); MapKit decides annotation stacking for itself, so
+  declaration order is not a guarantee; an annotation *added later* does land on top,
+  which is what the token exploited; and **none of that touches the gesture** — a
+  pill carries its own `DragGesture` on a `contentShape`, so under `MarkerDisplay.on`
+  it takes the touch whatever is painted above it. Three mechanisms have now been
+  tried and reverted: the `ZStack` overlay (lost camera tracking through a pan), the
+  token re-add, and the yielding rule. The **vector** layer orders drawing and
+  hit-testing explicitly and has never had the problem.
+  On **vector** the same order is explicit: `drawPin` moved from just after the
+  markers to the very end, after `drawPlayer`. `hit` is deliberately **not** reordered
+  to match — the drawn-is-tested rule is broken for the flag and only the flag,
+  because the green is where a golfer taps to place a target and a flag that took
+  those taps would be worse than one needing a second attempt to pick up.
+- **~~A typed log carries no hole either.~~ Superseded 2026-08-28 by
+  `LogEntry.HoleSource`** — see the next bullet. The *reasoning* was right and is
+  preserved by it rather than abandoned: `hole` meant "nearest hole to a measured
+  fix", `lat`/`lon`/`hAcc` sat beside it as the evidence, and one field carrying two
+  claims with nothing able to tell them apart is what made a typed entry never show
+  the `no hole` chip a spoken one did. The bullet's own escape hatch — "needs a
+  discriminator on `LogEntry` first" — is what was built.
+- **~~A log written from the hole view is filed with no hole~~ — it is filed on the
+  hole being looked at** *(X14, user 2026-08-28)*. The objection was real and is
+  answered rather than waived: `LogEntry.holeSource` is the discriminator the old
+  rule demanded, and the hole is written `.user` so `LogPlacement` leaves it alone.
+- **~~Fast tracking belongs to the Marker sheet, and to nothing else.~~ Reversed by
+  the user on 2026-08-30: "fast track when gps hole view is on screen, slow when
+  not".** The 2026-08-28 argument — a hole view is open for most of a round and
+  reading a yardage does not need a fix a second — is now history, not guidance. Both
+  the hole view and the Marker sheet escalate **both** feeds, and the resting state
+  is unchanged: slow everywhere else, and slow is what an empty set of reasons means.
+- **A player's shots are joined into a `PlayerTrack`, filtered to the hole on
+  screen** *(X13, user 2026-08-28: "connect the player's shots with line")*. Three
+  things the obvious version gets wrong, all of which are already rules elsewhere:
+  ~~the **tee is prepended**~~ — **voided by the user on 2026-08-28** ("why a line to
+  the first shot marker of a player. it should start from shot #1"). It drew a leg
+  from the tee box to wherever the drive finished: the one leg on the hole nobody
+  logged, in the same weight as the legs that were. **A track now starts at shot 1**
+  and a one-shot player draws no line, which is the honest answer — a line needs two
+  ends. The half that outlived it and had to go with it: both renderers drew the shot
+  dots as `shots.dropFirst()`, which existed *only* to skip the tee, so leaving it
+  would have erased shot 1's dot on both layers. A convention's consumer outliving
+  the convention, the same shape as the press-and-hold branch that ate taps for a
+  day. Caught by rendering a two-shot track, not by reading the diff.
+  It is **ordered by shot number, not by time**, because the numbers are
+  what a person assigned; and it is **filtered to this hole**, because
+  `PlayerTrack.allPoints` feeds `VectorHoleView.extraPoints` which feeds the
+  **framing fit** — a shot logged on the ninth would shrink the hole on screen to a
+  dot to keep a point half a mile away in frame. That is the framing rule arriving by
+  a new road.
+- **~~`CourseOverview` is vector-only~~ — overruled by the user on 2026-08-28
+  (X8: "meant gps satellite view with normal zoom, pan, etc. action"). The number is
+  still the control.** *(X4 built it as a fixed vector canvas with no gestures at
+  all; the imagery-would-be-unreadable argument was mine and it was wrong.)* It is
+  now a MapKit `Map` on `.imagery` with pan, zoom and rotate. **What survives the
+  overrule is the coverage rule**: the centre lines, tees, pins and numbers are all
+  vector overlays drawn from the course file, so a course with no signal loses the
+  photograph and keeps every hole, every number and every tap target. Nothing here
+  may come to depend on the imagery having loaded. **Nothing is laid over the bottom
+  of it** — Apple's logo and Legal link live there and `.mapControlVisibility` does
+  not touch attribution; the hole view reserves space with `bottomReserve`, here the
+  answer is to put nothing there. The `MKCoordinateRegion` span is **floored**, or a
+  file with one placed hole frames a zero span. The thing naming a hole is still the
+  thing you tap to go there — the same decision the scorecard makes, and why neither
+  screen needs a hole picker.
+- **~~Multipolygon relations are skipped by the OSM importer.~~ Closed 2026-08-30 — and it was
+  half a parser gap and half a one-word query bug.** `Element.coordinates` now answers for a
+  relation as well as a way, so nothing downstream knows which drew a fairway. The bullet used to
+  say "walking `members` from `out geom`" was what remained; the *actual* blocker was that the
+  query said `out tags geom`, a print mode in which a relation comes back with **`members` absent
+  entirely** — measured, 28 relations and zero members between them. Corica went from **1 fairway
+  outline to 18**, Coyote Creek from 0 to 18.

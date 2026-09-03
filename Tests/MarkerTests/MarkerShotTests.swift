@@ -118,5 +118,39 @@ final class MarkerShotTests: XCTestCase {
         XCTAssertNil(m.symbol)
         XCTAssertNil(m.tint)
     }
+
+    // MARK: - The line between unassigned marks (user, 2026-09-03)
+
+    private func mark(_ id: String, _ lat: Double) -> HoleMarker {
+        HoleMarker(id: id, at: Coordinate(lat: lat, lon: -122), label: "mark",
+                   isMark: true)
+    }
+
+    /// The caller's order is the line's order — the ids say which marks and in
+    /// which sequence, because `HoleMarker` carries no clock.
+    func testTheLineFollowsTheOrderTheIdsAreGivenIn() {
+        let marks = [mark("c", 37.2), mark("a", 37.0), mark("b", 37.1)]
+        let line = HoleMarker.line(["a", "b", "c"], in: marks)
+        XCTAssertEqual(line.map(\.lat), [37.0, 37.1, 37.2])
+    }
+
+    /// A dragged mark's leg follows the finger, the way a shot's track does —
+    /// **keyed by id**, which a mark has and a `PlayerTrack.Shot` does not.
+    func testADraggedMarkCarriesItsLine() {
+        let marks = [mark("a", 37.0), mark("b", 37.1)]
+        let line = HoleMarker.line(["a", "b"], in: marks,
+                                   moving: ("b", Coordinate(lat: 37.5, lon: -122)))
+        XCTAssertEqual(line.map(\.lat), [37.0, 37.5])
+    }
+
+    /// A mark not on screen closes the line up rather than breaking it in two —
+    /// two lines would read as two runs of presses, which is a different claim.
+    /// And fewer than two points is no line at all.
+    func testAMissingMarkIsSkippedAndOnePointDrawsNothing() {
+        let marks = [mark("a", 37.0), mark("c", 37.2)]
+        XCTAssertEqual(HoleMarker.line(["a", "b", "c"], in: marks).count, 2)
+        XCTAssertTrue(HoleMarker.line(["a", "b"], in: [mark("a", 37.0)]).isEmpty)
+        XCTAssertTrue(HoleMarker.line(["a"], in: marks).isEmpty)
+    }
     #endif
 }

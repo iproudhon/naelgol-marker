@@ -173,6 +173,33 @@ enum DemoSeed {
     /// here ever having seen one on screen. That is what this key is for.
     static var wantsSimulation: Bool { UserDefaults.standard.bool(forKey: "marker.simulate") }
 
+    /// Opens naelvol's swing sheet on the hole view — `-marker.swings YES` for the
+    /// list, `-marker.swings capture` for the camera.
+    ///
+    /// The same argument as `marker.sheet` and `marker.find`: both live behind the
+    /// pin menu, `ImageRenderer` cannot draw a `Menu`, and scripted taps do not
+    /// exist here — so without this the only reviewable state is the screen that
+    /// opens them.
+    static var openSwings: String? {
+        let value = UserDefaults.standard.string(forKey: "marker.swings")
+        return (value?.isEmpty ?? true) ? nil : value
+    }
+
+    /// Pushes the player over one seeded clip — `-marker.swings YES
+    /// -marker.swing swing-0001.mov`.
+    static var openSwing: String? {
+        let value = UserDefaults.standard.string(forKey: "marker.swing")
+        return (value?.isEmpty ?? true) ? nil : value
+    }
+
+    /// Writes a few short videos into `Documents/Swings/` so the grid has
+    /// something in it — `-marker.swings.seed YES`.
+    ///
+    /// **Real files, tagged with the seeded course and hole**, because the thing
+    /// worth looking at is the filter: a list opened from hole 7 must come up
+    /// showing hole 7's swings and a chip that clears.
+    static var wantsSwingSeed: Bool { UserDefaults.standard.bool(forKey: "marker.swings.seed") }
+
     /// Places targets on the hole — `-marker.targets 0.35,0.7`, as fractions along
     /// the tee-to-green line.
     ///
@@ -245,6 +272,7 @@ enum DemoSeed {
 
     @MainActor
     static func seedIfRequested() {
+        if wantsSwingSeed { seedSwings() }
         guard wantsSeed || wantsWipe else { return }
         let root = RoundViewModel.sessionsRoot
         try? FileManager.default.removeItem(at: root)
@@ -282,6 +310,7 @@ enum DemoSeed {
             device: "iOS", audioFormat: "none"))
 
         seedLogs(folder: folder, start: start, count: logs)
+        seedMarks(folder: folder, start: start)
         seedScores(folder: folder, players: players, start: start,
                    through: min(4, max(0, logs / 3)))
 
@@ -309,6 +338,49 @@ enum DemoSeed {
         try? w.close()
     }
 
+    /// Unassigned marks — the Action Button's, which is the only writer of them.
+    ///
+    /// **Ordinary `LogEntry` rows with `mark: true` and no player**, because that
+    /// is what `QuickMark` writes; seeding anything else would review a screen the
+    /// app does not produce. Written through the same `.log` writer as `seedLogs`,
+    /// after it, so the ids do not collide and the seeded events' citations do not
+    /// slide onto a different sentence.
+    ///
+    /// Seeded at all because there is **no Action Button in the simulator**, so
+    /// without these rows the empty ring cannot be looked at here. Three on hole 1
+    /// down the white-tee-to-green line, one of them beside a shot pill so the ring
+    /// and the numbered circle can be compared for weight; and one **with no fix**,
+    /// which is what a mark written when the radio never settled looks like — it
+    /// must be stored, must appear on the round screen's timeline, and must *not*
+    /// be drawn on the hole.
+    private static func seedMarks(folder: SessionFolder, start: Millis) {
+        guard let w = try? folder.writer(.log) else { return }
+        let rows: [(t: Int, at: (Double, Double)?, hole: Int?)] = [
+            (300,  (37.737100, -122.231900), 1),
+            (500,  (37.736500, -122.231300), 1),
+            // **Placed, and on no hole** — `Course.nearestHole` declines beyond
+            // 250 m and a round with no course file has nothing to ask, so this is
+            // the ordinary shape rather than a corner. It is drawn on every hole,
+            // and joined on every hole *(user, 2026-09-03)*; without a row like it
+            // the line's own selection rule cannot be looked at here.
+            (580,  (37.736100, -122.231260), nil),
+            // Beside steve's shot 2 pill.
+            (660,  (37.735906, -122.231226), 1),
+            (800,  nil, nil),
+        ]
+        for (i, r) in rows.enumerated() {
+            try? w.append(LogEntry(id: "mk\(i)",
+                                   t: start + Millis(r.t) * 1_000,
+                                   text: QuickMark.text,
+                                   lat: r.at?.0, lon: r.at?.1,
+                                   hAcc: r.at == nil ? nil : 5,
+                                   hole: r.hole,
+                                   source: .typed,
+                                   mark: true))
+        }
+        try? w.close()
+    }
+
     /// Spoken logs as they actually arrive — misheard names included. "Chungman"
     /// for "Chungmin" is a real observed failure of on-device recognition, and the
     /// event list is where fuzzy name matching has to survive it.
@@ -327,15 +399,20 @@ enum DemoSeed {
         // hole, and **the marker layer could not be seen in this environment at
         // all**. Points below are interpolated along each hole's own white-tee-to-
         // green line in `Courses/corica-park-south.json`.
+        // **No `"1: 2"` prefix on any of them** *(user, 2026-09-03: "no fillers")*.
+        // The hole and the shot are fields on the row and `LogTitle` prints them in
+        // front of the sentence; a seed that still wrote them into the text would
+        // review a row shape the app no longer produces — and would show the golfer
+        // the doubled title the prefix was retired for.
         let lines: [(t: Int, text: String, hole: Int?, at: (Double, Double)?,
                      player: String?, shot: Int?)] = [
-            (40,   "1: 1 steve is up first, driver",           1, (37.737387, -122.231713), "steve", 1),
-            (150,  "1: 1 dave in the left bunker off the tee", 1, (37.737600, -122.232100), "dave",  1),
-            (420,  "1: 2 steve on in two, about fifteen feet", 1, (37.735906, -122.231026), "steve", 2),
+            (40,   "steve is up first, driver",           1, (37.737387, -122.231713), "steve", 1),
+            (150,  "dave in the left bunker off the tee", 1, (37.737600, -122.232100), "dave",  1),
+            (420,  "steve on in two, about fifteen feet", 1, (37.735906, -122.231026), "steve", 2),
             // **A skipped shot on purpose**: 2 then 4, with no 3 ever logged, so
             // the leg that jumps carries a distance and the 1→2 leg does not.
             // That pair is the only way to look at the rule at all here.
-            (620,  "1: 4 steve pitched on",                     1, (37.735400, -122.230850), "steve", 4),
+            (620,  "steve pitched on",                     1, (37.735400, -122.230850), "steve", 4),
             (700,  "steve made five, dave had a six",          1, nil, nil, nil),
             (1_050,"min hit it in the water off the tee",      2, (37.736084, -122.229477), nil, nil),
             (1_260,"penalty drop for min",                     2, (37.736431, -122.229231), nil, nil),
@@ -357,9 +434,9 @@ enum DemoSeed {
             // Appended at the end rather than in date order on purpose: the seeded
             // events cite logs by id, and inserting mid-list would slide every
             // citation onto a different sentence.
-            (2_900,"1: 1 min striped one down the middle",     1, (37.737450, -122.231600), "min", 1),
-            (2_920,"1: 2 min laid up short of the green",      1, (37.736200, -122.230600), "min", 2),
-            (2_940,"1: 3 min holed it from the fringe",        1, (37.735700, -122.229900), "min", 3),
+            (2_900,"min striped one down the middle",     1, (37.737450, -122.231600), "min", 1),
+            (2_920,"min laid up short of the green",      1, (37.736200, -122.230600), "min", 2),
+            (2_940,"min holed it from the fringe",        1, (37.735700, -122.229900), "min", 3),
             // **Twenty metres off the white tee, so its pill lands *on* the
             // simulated marker** *(2026-08-29)*. The simulated position seeds at the
             // tee and a pill hangs below its own point, so nothing here had ever
@@ -368,7 +445,7 @@ enum DemoSeed {
             // environment at all. Placed down the tee-to-green line rather than due
             // north: the camera is rotated to put the green at the top, so
             // *increasing* latitude moves a point **down** the screen here.
-            (2_960,"1: 1 chungman still on the tee",           1, (37.738366, -122.232166), "chungman", 1),
+            (2_960,"chungman still on the tee",           1, (37.738366, -122.232166), "chungman", 1),
         ]
         for (i, line) in lines.prefix(count).enumerated() {
             try? w.append(LogEntry(
@@ -440,6 +517,85 @@ enum DemoSeed {
         // still sees a card. `RoundDocument.replay` rewrites it on every change.
         let state = JournalReplay.replay(rows)
         try? folder.writeJSON(state.scorecard, to: .scorecard)
+    }
+}
+#endif
+
+#if DEBUG
+import AVFoundation
+import NaelvolCore
+
+extension DemoSeed {
+    /// Three tiny movies in `Documents/Swings/`, tagged the way a capture from the
+    /// hole view would tag them.
+    ///
+    /// **Written rather than checked in**: a fixture video in git is a binary
+    /// nobody can review, and this is a dozen lines of AVFoundation. Two are on
+    /// hole 7 of the seeded course and one is on hole 3, so a list opened from
+    /// hole 7 can be seen to be *filtered* rather than merely short.
+    static func seedSwings() {
+        let root = SwingFeature.swingsRoot
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let course = "corica-park-south"
+        let plan: [(String, UInt8, SwingContext)] = [
+            ("swing-0001.mov", 40, SwingContext(courseID: course, courseName: "Corica Park South",
+                                                hole: 7, playerName: "steve", tags: ["driver"])),
+            ("swing-0002.mov", 90, SwingContext(courseID: course, courseName: "Corica Park South",
+                                                hole: 7, playerName: "dave", tags: ["7-iron", "fade"])),
+            ("swing-0003.mov", 140, SwingContext(courseID: course, courseName: "Corica Park South",
+                                                 hole: 3, playerName: "steve", tags: ["wedge"])),
+        ]
+        for (name, shade, context) in plan {
+            let url = root.appendingPathComponent(name)
+            writeMovie(at: url, frames: 24, shade: shade)
+            writeMeta(SwingMeta(context: context), to: url)
+        }
+    }
+
+    /// **Synchronous on purpose.** This runs before the first screen appears, from
+    /// a stored-property initialiser, so anything that finishes a moment later is
+    /// a screenshot of an empty grid.
+    private static func writeMovie(at url: URL, frames: Int, shade: UInt8) {
+        guard let writer = try? AVAssetWriter(url: url, fileType: .mov) else { return }
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: 320, AVVideoHeightKey: 180,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: 320, kCVPixelBufferHeightKey as String: 180,
+            ])
+        writer.add(input)
+        writer.startWriting()
+        writer.startSession(atSourceTime: .zero)
+        for i in 0..<frames {
+            var buffer: CVPixelBuffer?
+            CVPixelBufferCreate(nil, 320, 180, kCVPixelFormatType_32BGRA, nil, &buffer)
+            guard let buffer else { continue }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            if let base = CVPixelBufferGetBaseAddress(buffer) {
+                memset(base, Int32(shade &+ UInt8(i * 3)), CVPixelBufferGetDataSize(buffer))
+            }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            while !input.isReadyForMoreMediaData { usleep(2000) }
+            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: 30))
+        }
+        input.markAsFinished()
+        let done = DispatchSemaphore(value: 0)
+        writer.finishWriting { done.signal() }
+        _ = done.wait(timeout: .now() + 10)
+    }
+
+    private static func writeMeta(_ meta: SwingMeta, to url: URL) {
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            try? await SwingMetadata.write(meta, to: url)
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 10)
     }
 }
 #endif

@@ -31,6 +31,10 @@ struct HoleSettingsMenu: View, Equatable {
     let hasTargets: Bool
     let hasPlayer: Bool
     let canEdit: Bool
+    /// Whether the host offers swing video at all. **Both items or neither** — a
+    /// host that has no swing feature (`golfctl`, the render harness) passes
+    /// nothing and this menu is exactly what it was.
+    let hasSwings: Bool
     let style: HoleStyle
 
     var onEdit: () -> Void
@@ -41,12 +45,14 @@ struct HoleSettingsMenu: View, Equatable {
     var onFit: () -> Void
     var onClearTargets: () -> Void
     var onCourseView: () -> Void
+    var onSwings: () -> Void
+    var onCaptureSwing: () -> Void
 
     static func == (a: Self, b: Self) -> Bool {
         a.holeRef == b.holeRef && a.tees == b.tees && a.teeName == b.teeName
             && a.layer == b.layer && a.unit == b.unit
             && a.hasTargets == b.hasTargets && a.hasPlayer == b.hasPlayer
-            && a.canEdit == b.canEdit
+            && a.canEdit == b.canEdit && a.hasSwings == b.hasSwings
     }
 
     var body: some View {
@@ -96,6 +102,21 @@ struct HoleSettingsMenu: View, Equatable {
             if hasTargets {
                 Button(role: .destructive, action: onClearTargets) {
                     Label("Clear targets", systemImage: "scope")
+                }
+            }
+
+            // **Swing video lives here and nowhere else on this screen** — X12's
+            // rule is *moved, not duplicated*, and the hole view has exactly one
+            // drag gesture by design, so neither of these earns a tool-column
+            // button or a fifth gesture. The list opens filtered to this course
+            // and this hole; both chips clear.
+            if hasSwings {
+                Divider()
+                Button(action: onSwings) {
+                    Label("Swings on this hole", systemImage: "figure.golf")
+                }
+                Button(action: onCaptureSwing) {
+                    Label("Record a swing", systemImage: "video.badge.plus")
                 }
             }
         } label: {

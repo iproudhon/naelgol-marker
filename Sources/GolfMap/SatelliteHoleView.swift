@@ -64,6 +64,9 @@ public struct SatelliteHoleView: View {
     public var onCenterMeasure: ((Int, Coordinate) -> Void)?
     public var onTapMeasure: ((Int) -> Void)?
     public var markers: [HoleMarker] = []
+    /// The unassigned marks to join, **in the order they were pressed**. See
+    /// `HoleMarker.line`.
+    public var markLine: [String] = []
     /// What the markers layer is doing — see `MarkerDisplay`.
     public var markerDisplay: MarkerDisplay = .on
     /// What ground is on screen, reported back out. Here it is MapKit's own camera
@@ -147,6 +150,7 @@ public struct SatelliteHoleView: View {
                 onCenterMeasure: ((Int, Coordinate) -> Void)? = nil,
                 onTapMeasure: ((Int) -> Void)? = nil,
                 markers: [HoleMarker] = [],
+                markLine: [String] = [],
                 markerDisplay: MarkerDisplay = .on,
                 ground: Binding<GroundView?> = .constant(nil),
                 pendingMarker: (id: String, at: Coordinate)? = nil,
@@ -174,6 +178,7 @@ public struct SatelliteHoleView: View {
         self.onCenterMeasure = onCenterMeasure
         self.onTapMeasure = onTapMeasure
         self.markers = markers
+        self.markLine = markLine
         self.markerDisplay = markerDisplay
         self._ground = ground
         self.pendingMarker = pendingMarker
@@ -540,8 +545,36 @@ public struct SatelliteHoleView: View {
         }
     }
 
+    /// The marks joined in press order — see `HoleMarker.line` and the vector
+    /// layer, which draws the same line at the same weight. Declared before the
+    /// player tracks so it stays the fainter of the two claims on a hole carrying
+    /// both.
+    @MapContentBuilder
+    private var markLineOverlay: some MapContent {
+        let marks = HoleMarker.line(markLine, in: markers, moving: markerDrag)
+        if marks.count >= 2 {
+            // **A casing under it, which the vector layer does not need.** The line
+            // is pale and a point wide, and it is the same weight on both layers by
+            // design — but the vector hole is dark green and a photograph of one is
+            // not, so on sunlit grass a bone hairline at 65% simply is not there.
+            // Screenshotted before this was added: the rings were legible and the
+            // line joining them was invisible. Every other annotation on this layer
+            // buys the same contrast with `.shadow`, which a `MapPolyline` has no
+            // way to take.
+            MapPolyline(coordinates: marks.map(\.clLocation))
+                .stroke(Color.black.opacity(0.35 * markerDisplay.opacity),
+                        style: StrokeStyle(lineWidth: style.markLineWidth + 2,
+                                           lineCap: .round))
+            MapPolyline(coordinates: marks.map(\.clLocation))
+                .stroke(style.markLineInk.opacity(markerDisplay.opacity),
+                        style: StrokeStyle(lineWidth: style.markLineWidth,
+                                           lineCap: .round))
+        }
+    }
+
     @MapContentBuilder
     private var trackOverlays: some MapContent {
+        markLineOverlay
         ForEach(drawnTracks) { track in
             if track.shots.count >= 2 {
                 // Slim — see the vector layer; the two must not differ in weight or
@@ -717,11 +750,20 @@ public struct SatelliteHoleView: View {
     /// needed, not a reordering.
     private func markerPill(_ m: HoleMarker) -> some View {
         HStack(spacing: 4) {
-            if let symbol = m.symbol {
+            // **An unassigned mark is an empty circle, in a shot's slot.** It is
+            // the same object as a shot marker with nothing put on it yet — same
+            // anchor, same tongue, same gesture — so the only difference is what is
+            // drawn inside it. See `HoleMarker.isMark`.
+            if m.isMark {
+                Circle()
+                    .strokeBorder(style.markInk, lineWidth: 1.5)
+                    .frame(width: style.markRadius * 2, height: style.markRadius * 2)
+            }
+            if !m.isMark, let symbol = m.symbol {
                 Image(systemName: symbol)
                     .font(.system(size: 11, weight: .semibold))
             }
-            if !m.title.isEmpty {
+            if !m.isMark, !m.title.isEmpty {
                 Text(m.title)
                     .font(.system(size: 11, weight: m.isShot ? .bold : .medium))
             }
@@ -732,11 +774,11 @@ public struct SatelliteHoleView: View {
         // because `markerAnchor` is computed from it — change the height here and
         // the grab handle lands back on the label, which is a flip that has already
         // been made and unmade once.
-        .frame(width: m.isShot ? Self.pillHeight : nil)
-        .padding(.horizontal, m.isShot ? 0 : 7)
+        .frame(width: (m.isShot || m.isMark) ? Self.pillHeight : nil)
+        .padding(.horizontal, (m.isShot || m.isMark) ? 0 : 7)
         .frame(height: Self.pillHeight)
         .background(.black.opacity(0.66),
-                    in: m.isShot ? AnyShape(Circle()) : AnyShape(Capsule()))
+                    in: (m.isShot || m.isMark) ? AnyShape(Circle()) : AnyShape(Capsule()))
     }
 
     @MapContentBuilder
@@ -770,7 +812,23 @@ public struct SatelliteHoleView: View {
                     // down … it's overlapping right now")*. A shot's own circle is
                     // 11 points across and the pill was starting at the coordinate
                     // itself, so the caption sat on the thing it is a claim about.
+                    // **A mark's own point, drawn at the seam** *(user, 2026-09-03:
+                    // "position dot is too small")*. On this layer nothing draws a
+                    // marker's point at all — a shot's dot comes from its track and a
+                    // mark has no track, so an unassigned mark's position was stated
+                    // only by where a ring hung. An **overlay**, never a row in the
+                    // stack: `markerAnchor` is computed from these heights, so a real
+                    // view here would slide every pill off its coordinate.
                     Color.clear.frame(width: 64, height: style.markerLabelGap)
+                        .overlay(alignment: .top) {
+                            if m.isMark {
+                                Circle().fill(style.markInk)
+                                    .frame(width: style.markDotRadius * 2,
+                                           height: style.markDotRadius * 2)
+                                    .offset(y: -style.markDotRadius)
+                                    .shadow(radius: 1.5)
+                            }
+                        }
                     markerPill(m)
                 }
                 .contentShape(Rectangle())

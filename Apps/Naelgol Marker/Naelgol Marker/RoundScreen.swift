@@ -1,4 +1,5 @@
 import SwiftUI
+import NaelvolCore
 import Combine
 import GolfSessionFormat
 import GolfCourse
@@ -36,6 +37,9 @@ struct RoundScreen: View {
     /// holds both.
     @ObservedObject var location: LiveLocation
     @StateObject private var library = CourseLibrary()
+
+    @EnvironmentObject private var swings: SwingFeature
+    @State private var swingRequest: SwingRequest?
     /// The OSM course finder *(user, 2026-08-30)*. Offered here as well as on the
     /// hole view, because the hole view is reached *through* a course — so the one
     /// entry point that mattered was the one an install with no courses cannot use.
@@ -51,10 +55,18 @@ struct RoundScreen: View {
     /// The log being edited, if any. A sheet rather than an inline field: the text
     /// is a whole sentence and the keyboard covers the list it came from.
     @State private var editing: LogEntry?
+    /// Rows ticked in edit mode, by `TimelineRow.id` *(user, 2026-09-03: "want to
+    /// be able to select and delete them")*. Cleared whenever edit mode ends, or a
+    /// selection made on hole 4 would delete rows on hole 7 after a hole change.
+    @State private var selection = Set<String>()
+    @State private var picking = false
     @State private var showHistory = false
     @State private var exporting = false
     @State private var showRoster = false
     @State private var showModels = false
+    /// Seconds the Action Button holds the radio — see `QuickMark.deadline`, which
+    /// reads the same key and owns the default.
+    @AppStorage(QuickMark.deadlineKey) private var markWait = 15
     /// Re-reading one entry's audio with the bigger model. Its own object because
     /// the pass takes seconds and the row has to show that it is running.
     @StateObject private var retranscribe = LogRetranscribe()
@@ -131,6 +143,15 @@ struct RoundScreen: View {
                                 player: doc.players.first?.id ?? "", hole: hole)
             case "marker":  showMarker = true
             case "export":  exporting = true
+            // The editor and the picker are both reached by a finger — a tap on a
+            // row and a tap on "Select" — and there are no scripted taps here, so
+            // without these two the only reviewable state is the list at rest.
+            case "edit":    editing = doc.currentLogs.first { $0.isShot }
+                                   ?? doc.currentLogs.first
+            // The textless case — an Action Button mark — which is the one the
+            // editor's placeholder and its empty-text save exist for.
+            case "editmark": editing = doc.currentLogs.first { $0.isUnassignedMark }
+            case "select":  picking = true
             default: break
             }
             if DemoSeed.wantsMap { holeFocus = HoleFocus(ref: holeRefFor(hole)) }
@@ -172,11 +193,16 @@ struct RoundScreen: View {
         .sheet(item: $editing) { log in
             LogEditor(log: log, holes: holeChoices, players: doc.players) {
                 text, hole, player, shot in
-                doc.amendLog(log, text: text, hole: .some(hole),
-                             player: .some(player), shot: .some(shot))
+                // **`editLog`, not `amendLog`** — a shot number arriving or leaving
+                // renumbers the rest of the player's hole. See `ShotEditing`.
+                doc.editLog(log, text: text, hole: hole, player: player, shot: shot)
                 editing = nil
-            } cancel: { editing = nil }
+            } cancel: { editing = nil } delete: {
+                doc.removeLog(log)
+                editing = nil
+            }
         }
+        .modifier(SwingSheetPresenter(swings: swings, request: $swingRequest))
         .sheet(isPresented: $showHistory) {
             HistoryView(doc: doc, holeLabel: label(forHole:))
         }
@@ -294,7 +320,7 @@ struct RoundScreen: View {
                     Text("Type what happened below.")
                 }
             } else {
-                List {
+                List(selection: $selection) {
                     ForEach(rows) { row in
                         switch row {
                         case .event(let e):
@@ -322,8 +348,15 @@ struct RoundScreen: View {
                                    holeLabel: holeLabel(l.hole),
                                    playerName: doc.players.first { $0.id == l.player }?.name,
                                    rereading: retranscribe.running.contains(l.id))
+                                // **A tap opens the editor** *(user, 2026-09-03:
+                                // "click on mark opens mark editor")*. Gated on
+                                // edit mode: with the ticks showing, a tap means
+                                // "select this one", and a row that opened a sheet
+                                // instead would make multi-select unusable.
+                                .contentShape(Rectangle())
+                                .onTapGesture { if !picking { editing = l } }
                                 .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) { doc.deleteLog(l) } label: {
+                                    Button(role: .destructive) { doc.removeLog(l) } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
                                     Button { editing = l } label: {
@@ -339,8 +372,17 @@ struct RoundScreen: View {
                     }
                 }
                 .listStyle(.plain)
+                // **The list's edit mode is driven by `picking`, not by an
+                // `EditButton`.** The button that toggles it is on the hole strip,
+                // and the row taps have to know: a tap in edit mode means "tick
+                // this", so `LogRow`'s own tap gesture stands down.
+                .environment(\.editMode, .constant(picking ? .active : .inactive))
             }
         }
+        // A hole change, or leaving "All holes", changes what the list holds —
+        // keeping ticks across that would delete rows the golfer never saw ticked.
+        .onChange(of: hole) { _, _ in if picking { stopPicking() } }
+        .onChange(of: showAllHoles) { _, _ in if picking { stopPicking() } }
     }
 
     /// A `Picker` would need eighteen rows of a menu; the card above is already the
@@ -355,13 +397,53 @@ struct RoundScreen: View {
                 Text("PAR \(par)").font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            Button(showAllHoles ? "This hole" : "All holes") {
-                withAnimation { showAllHoles.toggle() }
+            // **Select lives on the list's own strip, not in the navigation bar**
+            // *(user, 2026-09-03: "want to be able to select and delete them")*.
+            // The bar already carries the round's controls — the hole view, the
+            // menu, the live chip — and these two act on the rows underneath, which
+            // is where the "All holes" escape hatch already sits.
+            if picking {
+                Button(role: .destructive) { deleteSelected() } label: {
+                    Text(selection.isEmpty ? "Delete" : "Delete \(selection.count)")
+                }
+                .font(.caption)
+                .disabled(selection.isEmpty)
+                Button("Done") { stopPicking() }
+                    .font(.caption)
+            } else {
+                Button(showAllHoles ? "This hole" : "All holes") {
+                    withAnimation { showAllHoles.toggle() }
+                }
+                .font(.caption)
+                Button("Select") { withAnimation { picking = true } }
+                    .font(.caption)
+                    .disabled(rowsAreEmpty)
             }
-            .font(.caption)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
+    }
+
+    private var rowsAreEmpty: Bool { timeline.isEmpty }
+
+    private func stopPicking() {
+        withAnimation { picking = false }
+        selection.removeAll()
+    }
+
+    /// **Deleted one row at a time, through the same calls a swipe uses**, so a
+    /// selected shot renumbers the player's hole exactly as a swiped one does and a
+    /// selected proposal is dropped the way a rejected one is. Nothing here is an
+    /// erasure: a log is tombstoned and an event superseded.
+    private func deleteSelected() {
+        let chosen = selection
+        for row in timeline where chosen.contains(row.id) {
+            switch row {
+            case .log(let l): doc.removeLog(l)
+            case .event(let e): doc.delete(e)
+            }
+        }
+        stopPicking()
     }
 
     /// The number printed on the card, which on a course of named nines is not the
@@ -697,6 +779,26 @@ struct RoundScreen: View {
     }
 
 
+    // MARK: - Swings
+
+    /// The round's course and roster reach naelvol here, not at launch: this
+    /// screen is the one that knows both, and a player added mid-round exists only
+    /// in the journal.
+    private func refreshSwingCatalog() {
+        swings.refreshCatalog(courses: library.courses, players: doc.players, roundID: id)
+    }
+
+    private func openSwings() {
+        refreshSwingCatalog()
+        // The course, not the round — see `CourseView.openSwings`.
+        swingRequest = .list(SwingFilter(courseID: roundCourse?.id))
+    }
+
+    private func openCapture() {
+        refreshSwingCatalog()
+        swingRequest = .capture(SwingContext(courseID: roundCourse?.id, roundID: id))
+    }
+
     // MARK: - Toolbar
 
     private var roundMenu: some View {
@@ -729,6 +831,16 @@ struct RoundScreen: View {
             // once either is on a clipboard nothing says which.
             Button { exporting = true } label: {
                 Label("Export round…", systemImage: "square.and.arrow.up")
+            }
+            // **Seeded with this round's course and nothing else.** The scorecard
+            // is a whole round, so a hole would be a guess; the chip clears either
+            // way, because a golfer looking for one swing reaches the list from
+            // wherever they are standing.
+            Button { openSwings() } label: {
+                Label("Swings", systemImage: "figure.golf")
+            }
+            Button { openCapture() } label: {
+                Label("Record a swing", systemImage: "video.badge.plus")
             }
             // Only offered when somebody has a course handicap. A Net toggle that
             // changes nothing on screen is a control that looks broken.
@@ -764,6 +876,21 @@ struct RoundScreen: View {
             if !isLive, doc.isOpen {
                 Button { showCloseOut = true } label: {
                     Label("Close out this round", systemImage: "exclamationmark.triangle")
+                }
+            }
+
+            // **The Action Button's wait, on screen because it is a trade the
+            // golfer owns** *(user, 2026-09-03)*. iOS ties the button's run to the
+            // work a press keeps alive, so this is also the window in which the
+            // *next* press is swallowed: longer is a better single position, shorter
+            // catches a quick second shot. Here rather than in a settings screen
+            // because this is where a round is looked at, and the choice is made
+            // after noticing one of the two failures on the course.
+            Section("Action Button") {
+                Picker("Mark waits", selection: $markWait) {
+                    ForEach(QuickMark.deadlineChoices, id: \.self) { s in
+                        Text("\(s) s").tag(s)
+                    }
                 }
             }
 
@@ -937,7 +1064,14 @@ private struct LogRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(log.text)
+                // **The row is titled the way the editor is** *(user, 2026-09-03:
+                // "`<player name>·<hole #>·<shot #>: <text>`")*. It used to print
+                // `log.text` alone, which worked only because the text carried a
+                // `"7: 2"` prefix restating those fields — and a marker filed from
+                // the Action Button has no text at all, so it printed the filler
+                // word that prefix was. `LogTitle` is the one composer.
+                Text(LogTitle.of(player: playerName, holeRef: holeLabel,
+                                 shot: log.shot, text: log.text))
                 HStack(spacing: 6) {
                     Text(clock).monospacedDigit()
                     if rereading {
@@ -949,17 +1083,11 @@ private struct LogRow: View {
                         // anything on a hole and nothing downstream will say so.
                         Label("no fix", systemImage: "location.slash")
                     }
-                    if let playerName {
-                        // Shot number and name together when it is a shot, the name
-                        // alone otherwise — the same reading `HoleMarker.title`
-                        // gives the pill on the hole, so a row and its marker say
-                        // the same thing.
-                        Label(log.shot.map { "\($0) · \(playerName)" } ?? playerName,
-                              systemImage: "figure.golf")
-                    }
-                    if let holeLabel {
-                        Label(holeLabel, systemImage: "flag")
-                    } else {
+                    // **Only what the title cannot say.** The player, the shot and
+                    // the hole are in the line above now; what is left down here is
+                    // the pair of *absences*, which are the two things a row has to
+                    // report and a title has nothing to print for.
+                    if holeLabel == nil {
                         // This row appears on *every* hole. Unlabelled it reads as
                         // a duplicate; labelled it reads as the open question it is.
                         Label("no hole", systemImage: "flag.slash")

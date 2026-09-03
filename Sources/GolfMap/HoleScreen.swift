@@ -44,6 +44,18 @@ public struct HoleScreen<Bar: View>: View {
     /// "location is usable" stop being the same claim. Nil hides the chip.
     /// Recorded entries to draw on the hole, when the marker toggle is on. X7.
     public var markers: [HoleMarker] = []
+    /// The unassigned marks to join with a line, **in the order they were entered**
+    /// *(user, 2026-09-03: "draw lines between unassigned marks using thin line,
+    /// ordered by entered time")*.
+    ///
+    /// Ids, not points, and the app's order, not this view's — see `HoleMarker.line`
+    /// for both reasons. The caller decides which marks belong to the hole on
+    /// screen, including the ones whose fix resolved to no hole at all, which are
+    /// drawn on every hole and joined on every hole *(user, 2026-09-03)*.
+    ///
+    /// **Never fed to the framing fit**, like everything else on the markers layer —
+    /// it reaches the renderers and stops there.
+    public var markLine: [String] = []
     /// Today's flag per hole, keyed by **1-based playing index** — the same number
     /// `Event.hole` and `LogEntry.hole` store, and the same one a scorecard column
     /// means. Not `Hole.ref`, which is not a key: a Korean 27 has three holes
@@ -72,6 +84,18 @@ public struct HoleScreen<Bar: View>: View {
     /// A marker was tapped — X13. The app opens its dialog; this view knows nothing
     /// about what a log is or how one is edited.
     public var onMarkerTapped: ((String) -> Void)?
+
+    /// Swing video, if the host has any. **Optional closures rather than a second
+    /// generic slot beside `Bar`**: the precedent is `onMark: nil` — the control
+    /// is drawn only when somebody passes one, and `golfctl`, the tests and the
+    /// render harness pass nothing and lose nothing. A second generic parameter
+    /// would cost another `where Bar == EmptyView` initialiser.
+    ///
+    /// `GolfMap` deliberately does not learn what a swing is: it reports the hole
+    /// and the app decides what that means, the same way `HoleMarker` keeps
+    /// `LogEntry` out of this package.
+    public var onSwings: ((Int) -> Void)?
+    public var onCaptureSwing: ((Int) -> Void)?
     /// Which hole is on screen — `Hole.ref` and the **1-based playing index**, the
     /// two forms the rest of the app needs.
     ///
@@ -284,6 +308,7 @@ public struct HoleScreen<Bar: View>: View {
                 onEditHole: ((String) -> Void)? = nil,
                 onPosition: ((Coordinate?) -> Void)? = nil,
                 markers: [HoleMarker] = [],
+                markLine: [String] = [],
                 pins: [Int: Coordinate] = [:],
                 onMovePin: ((Int, Coordinate) -> Void)? = nil,
                 onAddShot: ((String, Int) -> Void)? = nil,
@@ -291,11 +316,14 @@ public struct HoleScreen<Bar: View>: View {
                 onMarkerMoved: ((String, Coordinate) -> Void)? = nil,
                 onMarkerTapped: ((String) -> Void)? = nil,
                 onHoleChanged: ((String, Int) -> Void)? = nil,
+                onSwings: ((Int) -> Void)? = nil,
+                onCaptureSwing: ((Int) -> Void)? = nil,
                 @ViewBuilder bottomBar: @escaping () -> Bar) {
         self.course = course
         self.bottomBar = bottomBar
         self.onPosition = onPosition
         self.markers = markers
+        self.markLine = markLine
         self.pins = pins
         self.onMovePin = onMovePin
         self.onAddShot = onAddShot
@@ -303,6 +331,8 @@ public struct HoleScreen<Bar: View>: View {
         self.onMarkerMoved = onMarkerMoved
         self.onMarkerTapped = onMarkerTapped
         self.onHoleChanged = onHoleChanged
+        self.onSwings = onSwings
+        self.onCaptureSwing = onCaptureSwing
         self.player = player
         self.accuracy = accuracy
         self.tracks = tracks
@@ -340,23 +370,28 @@ public extension HoleScreen where Bar == EmptyView {
          onEditHole: ((String) -> Void)? = nil,
          onPosition: ((Coordinate?) -> Void)? = nil,
          markers: [HoleMarker] = [],
+         markLine: [String] = [],
          pins: [Int: Coordinate] = [:],
          onMovePin: ((Int, Coordinate) -> Void)? = nil,
          onAddShot: ((String, Int) -> Void)? = nil,
          onHoleOut: ((String, Int?) -> Void)? = nil,
          onMarkerMoved: ((String, Coordinate) -> Void)? = nil,
          onMarkerTapped: ((String) -> Void)? = nil,
-         onHoleChanged: ((String, Int) -> Void)? = nil) {
+         onHoleChanged: ((String, Int) -> Void)? = nil,
+         onSwings: ((Int) -> Void)? = nil,
+         onCaptureSwing: ((Int) -> Void)? = nil) {
         self.init(course: course, holeRef: holeRef, player: player,
                   accuracy: accuracy, tracks: tracks,
                   targets: targets, simulating: simulating,
                   showingCourse: showingCourse, bump: bump,
                   focus: focus, terrain: terrain, onMark: onMark, onEditHole: onEditHole,
-                  onPosition: onPosition, markers: markers,
+                  onPosition: onPosition, markers: markers, markLine: markLine,
                   pins: pins, onMovePin: onMovePin, onAddShot: onAddShot,
                   onHoleOut: onHoleOut,
                   onMarkerMoved: onMarkerMoved, onMarkerTapped: onMarkerTapped,
-                  onHoleChanged: onHoleChanged, bottomBar: { EmptyView() })
+                  onHoleChanged: onHoleChanged,
+                  onSwings: onSwings, onCaptureSwing: onCaptureSwing,
+                  bottomBar: { EmptyView() })
     }
 }
 
@@ -512,6 +547,7 @@ extension HoleScreen {
                                    measures.remove(at: i)
                                },
                                markers: visibleMarkers,
+                               markLine: markLine,
                                pendingMarker: pendingMove.map { ($0.id, $0.to) },
                                pin: pins[holeIndex + 1],
                                onMovePin: { onMovePin?(holeIndex + 1, $0) },
@@ -542,6 +578,7 @@ extension HoleScreen {
                                       measures.remove(at: i)
                                   },
                                   markers: visibleMarkers,
+                                  markLine: markLine,
                                   markerDisplay: markerDisplay,
                                   ground: $ground,
                                   pendingMarker: pendingMove.map { ($0.id, $0.to) },
@@ -1045,6 +1082,7 @@ extension HoleScreen {
             hasTargets: !targets.isEmpty,
             hasPlayer: effectivePlayer != nil,
             canEdit: onEditHole != nil,
+            hasSwings: onSwings != nil || onCaptureSwing != nil,
             style: style,
             onEdit: { onEditHole?(hole.ref) },
             onTee: { teeName = $0 },
@@ -1053,7 +1091,12 @@ extension HoleScreen {
             onGoToMe: { centerOn = effectivePlayer },
             onFit: { withAnimation(.easeOut(duration: 0.25)) { viewport = .fitted } },
             onClearTargets: { targets = [] },
-            onCourseView: { showCourse = true })
+            onCourseView: { showCourse = true },
+            // The **1-based playing index**, which is what a scorecard column
+            // means and what `Course.nearestHole` answers with — never `Hole.ref`,
+            // which is not a key.
+            onSwings: { onSwings?(holeIndex + 1) },
+            onCaptureSwing: { onCaptureSwing?(holeIndex + 1) })
             // **X5 — the menu must not rebuild while it is open.** `tracking` changes
             // on every fix and on a five-second ticker, and any of those redraws this
             // whole subtree; SwiftUI then tears the open `Menu` down and puts a fresh

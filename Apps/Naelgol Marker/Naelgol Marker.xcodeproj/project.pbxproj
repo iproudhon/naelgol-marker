@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DE5322F530466E9300EFC326 /* NaelvolCore in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000030 /* NaelvolCore */; };
+		DE5322F630466E9300EFC326 /* NaelvolPose in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000031 /* NaelvolPose */; };
+		DE5322F730466E9300EFC326 /* NaelvolCapture in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000032 /* NaelvolCapture */; };
+		DE5322F830466E9300EFC326 /* NaelvolUI in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000033 /* NaelvolUI */; };
+		DE5322F930466E9300EFC326 /* NaelvolPoseTFLite in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000034 /* NaelvolPoseTFLite */; };
 		MK0000000000000000020 /* GolfSessionFormat in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000010 /* GolfSessionFormat */; };
 		MK0000000000000000021 /* GolfCaptureCore in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000011 /* GolfCaptureCore */; };
 		MK0000000000000000022 /* GolfCaptureMotion in Frameworks */ = {isa = PBXBuildFile; productRef = MK0000000000000000012 /* GolfCaptureMotion */; };
@@ -36,6 +41,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DE5322F930466E9300EFC326 /* NaelvolPoseTFLite in Frameworks */,
+				DE5322F830466E9300EFC326 /* NaelvolUI in Frameworks */,
+				DE5322F730466E9300EFC326 /* NaelvolCapture in Frameworks */,
+				DE5322F630466E9300EFC326 /* NaelvolPose in Frameworks */,
+				DE5322F530466E9300EFC326 /* NaelvolCore in Frameworks */,
 				MK0000000000000000020 /* GolfSessionFormat in Frameworks */,
 				MK0000000000000000021 /* GolfCaptureCore in Frameworks */,
 				MK0000000000000000022 /* GolfCaptureMotion in Frameworks */,
@@ -98,6 +108,11 @@
 				MK0000000000000000014 /* GolfMap */,
 				MK0000000000000000015 /* GolfReconstruction */,
 				MK0000000000000000016 /* GolfTranscription */,
+				MK0000000000000000030 /* NaelvolCore */,
+				MK0000000000000000031 /* NaelvolPose */,
+				MK0000000000000000032 /* NaelvolCapture */,
+				MK0000000000000000033 /* NaelvolUI */,
+				MK0000000000000000034 /* NaelvolPoseTFLite */,
 			);
 			productName = "Naelgol Marker";
 			productReference = DE532142303D008500EFC326 /* Naelgol Marker.app */;
@@ -129,6 +144,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				MK0000000000000000001 /* XCLocalSwiftPackageReference "../.." */,
+				MK0000000000000000002 /* XCLocalSwiftPackageReference "../../Naelvol" */,
+				MK0000000000000000003 /* XCLocalSwiftPackageReference "../../Naelvol/TFLite" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DE532143303D008500EFC326 /* Products */;
@@ -294,6 +311,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Marker films your swing when you press record on the swing screen. Nothing is filmed until you do, and the video stays on this iPhone.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Marker keeps recording your round while your phone is in your pocket. Without always-on location the track stops the moment the screen locks.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Marker records where each shot was played so your round can be mapped and measured.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Marker listens only while you have recording switched on, so it can write down what the group says about each shot. Recording is off until you start it.";
@@ -333,6 +351,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Marker films your swing when you press record on the swing screen. Nothing is filmed until you do, and the video stays on this iPhone.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Marker keeps recording your round while your phone is in your pocket. Without always-on location the track stops the moment the screen locks.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Marker records where each shot was played so your round can be mapped and measured.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Marker listens only while you have recording switched on, so it can write down what the group says about each shot. Recording is off until you start it.";
@@ -388,6 +407,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../..;
 		};
+		MK0000000000000000002 /* XCLocalSwiftPackageReference "../../Naelvol" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../Naelvol;
+		};
+		MK0000000000000000003 /* XCLocalSwiftPackageReference "../../Naelvol/TFLite" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../Naelvol/TFLite;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -430,6 +457,26 @@
 		MK0000000000000000019 /* GolfExchange */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = GolfExchange;
+		};
+		MK0000000000000000030 /* NaelvolCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NaelvolCore;
+		};
+		MK0000000000000000031 /* NaelvolPose */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NaelvolPose;
+		};
+		MK0000000000000000032 /* NaelvolCapture */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NaelvolCapture;
+		};
+		MK0000000000000000033 /* NaelvolUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NaelvolUI;
+		};
+		MK0000000000000000034 /* NaelvolPoseTFLite */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NaelvolPoseTFLite;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -513,12 +513,12 @@ struct MarkerSheet: View {
         guard chosenHole != nil || chosenPlayer != nil else { return }
         for id in live.markerSessionEntries {
             guard let head = LogStore.head(ofChainFrom: id, in: doc.folder) else { continue }
-            // **The prefix goes on a spoken entry too.** It is what the extraction
-            // pass reads, and a burst whose text lacked the hole and shot that a
-            // typed entry beside it carries would be the same entry recorded two
-            // different ways — decided by which recogniser happened to be running.
-            guard let next = head.edited(text: prefixed(head.text),
-                                         hole: chosenHole.map { $0 },
+            // **The text is left exactly as it was heard** *(user, 2026-09-03: "no
+            // fillers")*. It used to be re-written with a `"7: 2"` prefix, which put
+            // words into a sentence somebody spoke; the hole and the shot are the
+            // fields being stamped on the very next lines, and `LogTitle` prints
+            // them in front of the sentence wherever a row is read.
+            guard let next = head.edited(hole: chosenHole.map { $0 },
                                          player: chosenPlayer.map { $0 },
                                          shot: chosenShot.map { $0 })
             else { continue }
@@ -661,10 +661,12 @@ struct MarkerSheet: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             // **OK with an empty box still creates a marker** *(user, 2026-08-28)*.
-            // "7: 2" with nothing after it is a real entry — it is where a shot was
-            // played from, which is the whole of what the hole view draws — and
-            // requiring a sentence for it meant a golfer marking a position had to
-            // invent one.
+            // A row that says only *hole 7, shot 2, here* is a real entry — it is
+            // where a shot was played from, which is the whole of what the hole view
+            // draws — and requiring a sentence for it meant a golfer marking a
+            // position had to invent one. Since 2026-09-03 the row really is empty:
+            // it used to carry a `"7: 2"` prefix that made the text non-empty by
+            // accident.
             //
             // Two guards, and both are about not writing an empty *nothing*. The
             // entry must be *about* something, or the pill renders as a content-free
@@ -691,12 +693,12 @@ struct MarkerSheet: View {
         // typed path had been doing it since the old input box, which is why a typed
         // entry never showed the `no hole` chip a spoken one did. `LogPlacement`
         // derives the hole from the fix afterwards.
-        // **The hole and shot lead the sentence** *(user decision, 2026-08-28:
-        // "7: 2 drive into the left bunker")*. They are also stored as fields —
-        // the prefix is what a person reads in the round's timeline and what the
-        // extraction pass reads in `log.jsonl`, the fields are what the hole view
-        // draws from. Written once, so the two cannot drift apart.
-        let entry = doc.addLog(prefixed(text),
+        // **What was typed, and nothing else** *(user, 2026-09-03, retiring the
+        // 2026-08-28 `"7: 2 drive into the left bunker"` prefix)*. The hole and the
+        // shot are stored as fields and `LogTitle` composes them in front of the
+        // sentence wherever one is read, so the prefix had become the same claim
+        // printed twice — and on a marker with no sentence it was the whole text.
+        let entry = doc.addLog(text,
                                hole: chosenHole,
                                holeSource: chosenHole == nil ? nil : .user,
                                player: chosenPlayer, shot: chosenShot,
@@ -728,15 +730,6 @@ struct MarkerSheet: View {
     /// backstop, and running both is safe by construction: `LogPlacement.attempted`
     /// is a reservation, so two passes cannot converge one log at once, and a
     /// converged log is no longer `unplaced`.
-    /// `"7: 2 drive into the left bunker"` — the hole, then the shot number when
-    /// there is one. Nothing is prefixed when no hole is chosen, which is the "all
-    /// holes" case and a real answer.
-    private func prefixed(_ text: String) -> String {
-        guard chosenHole != nil else { return text }
-        let head = chosenShot.map { "\(chosenHoleRef): \($0)" } ?? "\(chosenHoleRef):"
-        return text.isEmpty ? head : "\(head) \(text)"
-    }
-
     private func place() {
         guard model.isRecording else { return }
         let folder = doc.folder

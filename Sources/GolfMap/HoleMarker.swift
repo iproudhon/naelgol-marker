@@ -37,10 +37,28 @@ public struct HoleMarker: Identifiable, Sendable, Hashable {
     /// Nil for an entry that belongs to nobody in particular.
     public var colorIndex: Int?
 
+    /// A marker nobody has claimed yet — the Action Button's.
+    ///
+    /// **It is a shot marker with nothing assigned to it** *(user, 2026-09-03: "I
+    /// want these markers to work the same way as when I clicked player marker
+    /// button, just player, shot # unassigned")*. Same slot, same handle, same tap,
+    /// same drag — the flag changes only what is *drawn* inside the circle, which
+    /// is nothing. A pill would read the same word on every one of them, and the
+    /// empty ring is the only thing on the layer that says *this has no player and
+    /// no number yet*.
+    ///
+    /// It stops being true the moment somebody assigns a player and a shot, at
+    /// which point the marker becomes an ordinary numbered circle. That transition
+    /// is the whole reason for filing one, so nothing here may make a mark harder
+    /// to pick up than the shot it is about to become.
+    public var isMark: Bool = false
+
     public init(id: String, at: Coordinate, symbol: String? = nil, label: String,
-                shot: Int? = nil, player: String? = nil, colorIndex: Int? = nil) {
+                shot: Int? = nil, player: String? = nil, colorIndex: Int? = nil,
+                isMark: Bool = false) {
         self.id = id; self.at = at; self.symbol = symbol; self.label = label
         self.shot = shot; self.player = player; self.colorIndex = colorIndex
+        self.isMark = isMark
     }
 
     /// What the pill reads: `1 · steve` for a shot, the abbreviated sentence
@@ -67,6 +85,36 @@ public struct HoleMarker: Identifiable, Sendable, Hashable {
     public var isShot: Bool { shot != nil }
 
     public var tint: Color? { colorIndex.map(HoleStyle.playerColor) }
+
+    /// The line joining a run of marks, resolved against what is actually drawn.
+    ///
+    /// *(User, 2026-09-03: "draw lines between unassigned marks using thin line,
+    /// ordered by entered time".)*
+    ///
+    /// **The order is the caller's and the ids are the caller's.** `GolfMap` has no
+    /// clock — a `HoleMarker` carries no timestamp, and inventing one here would mean
+    /// either a new field nothing else reads or ordering by position, which is a
+    /// different claim entirely. Which marks belong to the hole on screen is the
+    /// app's question too, since a `HoleMarker` has no hole on it either.
+    ///
+    /// Ids that are not on screen are skipped rather than treated as a break, so a
+    /// mark hidden by any future filter closes the line up instead of splitting it
+    /// into two lines that look like two runs.
+    ///
+    /// `moving` is the marker being dragged right now: its leg follows the finger,
+    /// the same way a shot's track does. **Keyed by id**, which a mark has and a
+    /// `PlayerTrack.Shot` does not — see `drawnTracks`, which has to match on the
+    /// coordinate for want of one.
+    public static func line(_ ids: [String], in markers: [HoleMarker],
+                            moving: (id: String, at: Coordinate)? = nil) -> [Coordinate] {
+        guard ids.count >= 2 else { return [] }
+        let byID = Dictionary(markers.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let points = ids.compactMap { id -> Coordinate? in
+            guard let m = byID[id] else { return nil }
+            return moving?.id == id ? moving?.at : m.at
+        }
+        return points.count >= 2 ? points : []
+    }
 
     /// The first few words, on one line.
     ///

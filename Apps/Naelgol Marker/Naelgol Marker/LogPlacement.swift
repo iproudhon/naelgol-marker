@@ -57,7 +57,17 @@ enum LogPlacement {
     /// fix, when nothing better arrives, or when the round has ended in the
     /// meantime. A log that stays unplaced is a visible, labelled state on screen
     /// (`no hole`), not an error.
-    static func converge(_ log: LogEntry, in folder: SessionFolder) async {
+    /// - Parameter within: how long to hold the radio. Defaults to `deadline`; the
+    ///   Action Button passes `QuickMark.deadline` because a deliberate request for
+    ///   a position is worth waiting longer for than a sentence spoken in passing.
+    /// - Parameter tag: names the radio window this convergence opens, so a later
+    ///   caller can cut it short — see `StableLocation.settleNow`. Cancelling this
+    ///   task settles that window **and keeps whatever it had found**, rather than
+    ///   throwing the wait away: a fix good enough to write is good enough to write
+    ///   early.
+    static func converge(_ log: LogEntry, in folder: SessionFolder,
+                         within seconds: TimeInterval = deadline,
+                         tag: String? = nil) async {
         // **The hole is not a retry condition, and treating it as one was an
         // infinite loop.** `Course.nearestHole` declines beyond 250 m, so a
         // perfectly good fix taken anywhere but on a mapped hole resolves to nil —
@@ -93,24 +103,64 @@ enum LogPlacement {
         defer { Task { @MainActor in UIApplication.shared.endBackgroundTask(task) } }
         #endif
 
-        let best = await StableLocation.best(within: deadline)
+        // **Cancellation settles the wait; it does not abandon it.** A second
+        // Action Button press cancels the first press's convergence, and the right
+        // answer there is to stop waiting and write the best fix so far — the
+        // golfer is walking away from the position this row is about.
+        let best = await withTaskCancellationHandler {
+            await StableLocation.best(within: seconds, tag: tag)
+        } onCancel: {
+            StableLocation.settleNow(tag: tag)
+        }
         ranTheRadio = true
         guard let fix = best,
               fix.horizontalAccuracy > 0, fix.horizontalAccuracy <= usableAccuracy
         else { return }
 
-        // Do not replace a *better* fix with a worse one just because it is newer.
-        if let existing = log.hAcc, existing <= fix.horizontalAccuracy { return }
+        // **The row may not be what it was when the wait started** *(user,
+        // 2026-09-03: "what if the user deletes or moves while it's in flight")*.
+        // Up to thirty seconds pass here, with the marker on screen the whole time
+        // and every gesture on it available: a drag, an edit, a delete. So the
+        // superseding row is built off the **chain head read from disk**, which is
+        // the rule everywhere else and which this function had been quietly
+        // breaking — writing off the stale copy would fork the chain, and
+        // `LogEntry.current` keeps *both* heads, so a deleted mark came back and a
+        // dragged one appeared twice.
+        let head = LogStore.head(ofChainFrom: log.id, in: folder) ?? log
+
+        // Deleted, moved by hand, or already better — all three refusals live in
+        // the package, where a test can reach them.
+        guard head.acceptsConvergedFix(accuracy: fix.horizontalAccuracy,
+                                       startedFrom: log.id) else { return }
 
         let coordinate = Coordinate(lat: fix.coordinate.latitude,
                                     lon: fix.coordinate.longitude)
         // Derived only when nobody has said otherwise — `LogEntry.placed` is what
         // enforces it, so the rule holds for every caller and not just this one.
         let hole = LogStore.hole(at: coordinate, folder: folder)
-        let placed = log.placed(lat: coordinate.lat, lon: coordinate.lon,
-                                hAcc: fix.horizontalAccuracy, hole: hole)
+        // Off the head, so an edit made during the wait — a player assigned to the
+        // mark, a sentence corrected, a hole chosen — survives being placed.
+        let placed = head.placed(lat: coordinate.lat, lon: coordinate.lon,
+                                 hAcc: fix.horizontalAccuracy, hole: hole)
         try? LogStore.shared.append(placed, to: folder)
     }
+
+    /// Give a log its turn back.
+    ///
+    /// **The `attempted` bargain is wrong for a hardware button.** One attempt per
+    /// launch is the right trade for a backlog of spoken sentences — "the golfer
+    /// who wants another can move it by hand" — but somebody who pressed the Action
+    /// Button pressed it *to get a position*, and a press made indoors or under
+    /// trees would otherwise be marked attempted for the rest of the launch, with
+    /// `RoundScreen`'s backstop task refusing it too. That would make
+    /// `QuickMark.deadline` a one-shot.
+    ///
+    /// **Not a loop.** `isPlaced` looks at position and accuracy only, so a
+    /// convergence that succeeds can never make this log a candidate again — that
+    /// is the structural property the 2026-08-27 infinite loop was fixed by, and it
+    /// is untouched. What this reopens is bounded by the placement task refiring,
+    /// which happens when the unplaced set changes, not on a timer.
+    static func forget(_ log: LogEntry) { attempted.remove(log.id) }
 
     /// True when this log has a position good enough to place something from.
     /// **Says nothing about `hole`** — see `LogEntry.isPlaced(within:)`, where the
@@ -139,13 +189,43 @@ enum LogPlacement {
 /// uses means "good enough to club off" has one definition in this app.
 enum StableLocation {
 
-    static func best(within seconds: TimeInterval) async -> CLLocation? {
+    /// - Parameter tag: an optional name for this window, so `settleNow(tag:)` can
+    ///   end **this** wait without touching anyone else's. Untagged waits — the
+    ///   Marker sheet's settle, an ordinary log's convergence — are never cut short
+    ///   by somebody else's button press.
+    static func best(within seconds: TimeInterval, tag: String? = nil) async -> CLLocation? {
         await withCheckedContinuation { continuation in
-            Delegate.begin(deadline: seconds) { continuation.resume(returning: $0) }
+            Delegate.begin(deadline: seconds, tag: tag) { continuation.resume(returning: $0) }
         }
     }
 
+    /// End every wait carrying `tag` **now**, each returning the best fix it has
+    /// found so far *(user, 2026-09-03: "what if the action button gets clicked
+    /// before done — I want to finish the current marking and start a new marker")*.
+    ///
+    /// **Not a cancellation.** The wait resumes normally with whatever it has, so
+    /// the mark it belongs to is placed as well as it can be from where it was
+    /// pressed. Letting it run on is the thing that cannot be allowed: the golfer
+    /// has already walked to the next position, and a fix arriving twenty seconds
+    /// late would stamp *that* coordinate onto the previous mark — the same class
+    /// of error as substituting the last known position for a missing one.
+    static func settleNow(tag: String?) {
+        guard let tag else { return }
+        for d in Delegate.live(tag: tag) { d.settle() }
+    }
+
     private final class Delegate: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+        /// Every wait currently holding the radio, so a tagged one can be found and
+        /// ended early. Removed on `complete()`, which every exit goes through.
+        private static let registry = NSLock()
+        private static var running: [Delegate] = []
+
+        static func live(tag: String) -> [Delegate] {
+            registry.lock(); defer { registry.unlock() }
+            return running.filter { $0.tag == tag }
+        }
+
+        private var tag: String?
         private let manager = CLLocationManager()
         private let lock = NSLock()
         private var done = false
@@ -162,12 +242,21 @@ enum StableLocation {
         /// *(2026-08-27)*.
         private var keepAlive: Delegate?
 
-        static func begin(deadline: TimeInterval, finish: @escaping (CLLocation?) -> Void) {
+        static func begin(deadline: TimeInterval, tag: String? = nil,
+                          finish: @escaping (CLLocation?) -> Void) {
             let d = Delegate()
             d.finish = finish
+            d.tag = tag
             d.keepAlive = d
+            if tag != nil {
+                registry.lock(); running.append(d); registry.unlock()
+            }
             d.start(deadline: deadline)
         }
+
+        /// Answer now with the best fix so far. Idempotent — `complete()` is
+        /// guarded by `done`, so a settle racing the deadline resolves once.
+        func settle() { complete() }
 
         private func start(deadline: TimeInterval) {
             manager.delegate = self
@@ -179,6 +268,21 @@ enum StableLocation {
                 return complete()
             }
             monitor.setMode(.fast)
+            #if os(iOS)
+            // **Without this the background path delivers nothing at all, and says
+            // nothing about it.** Invisible in the foreground — which is the only
+            // place this ran until the Action Button existed — but an intent
+            // launched with the app in the background gets no fixes unless the
+            // manager is told it may run there. Guarded on Always because iOS
+            // throws on setting it otherwise; with only WhenInUse the wait simply
+            // times out and the mark keeps the timestamp it was written with, which
+            // is `Mark`'s designed-for case.
+            manager.allowsBackgroundLocationUpdates =
+                manager.authorizationStatus == .authorizedAlways
+            // A stationary golfer is exactly when iOS decides to pause updates, and
+            // a paused manager never resumes inside a fifteen-second wait.
+            manager.pausesLocationUpdatesAutomatically = false
+            #endif
             manager.startUpdatingLocation()
             DispatchQueue.global().asyncAfter(deadline: .now() + deadline) { [self] in
                 complete()
@@ -189,6 +293,11 @@ enum StableLocation {
             lock.lock()
             guard !done else { return lock.unlock() }
             done = true
+            if tag != nil {
+                Self.registry.lock()
+                Self.running.removeAll { $0 === self }
+                Self.registry.unlock()
+            }
             let f = finish
             let result = best
             finish = nil

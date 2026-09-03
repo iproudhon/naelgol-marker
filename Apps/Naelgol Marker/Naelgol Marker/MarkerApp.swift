@@ -12,6 +12,12 @@ struct MarkerApp: App {
     /// also what makes the Location button read the same on both screens.
     @StateObject private var live = LiveLocation()
 
+    /// Swing video — browsing, capture, playback. **App-wide for the same reason
+    /// `live` is**: the library is scanned once and three screens open the same
+    /// one, and a per-screen `@StateObject` would rescan every folder each time a
+    /// golfer opened the list from a different place.
+    @StateObject private var swings = SwingFeature()
+
     /// Screenshot support only — see `DemoSeed`. Empty without the launch argument.
     private let initialPath: [RoundsListView.Route] = {
         #if DEBUG
@@ -26,6 +32,8 @@ struct MarkerApp: App {
     var body: some Scene {
         WindowGroup {
             RoundsListView(model: model, live: live, initial: initialPath)
+                .environmentObject(swings)
+                .environmentObject(swings.services)
                 // **Handover lives here, not on a screen.** While a round records,
                 // `LocationRecorder` owns the radio and this feed stands down: two
                 // managers asking for the same position is twice the power for one
@@ -44,6 +52,12 @@ struct MarkerApp: App {
                         live.adopt(accuracy: acc, mode: model.trackMode)
                     }
                 }
+                // naelvol asks the app two standing questions — where am I, and
+                // may I open the camera right now — and this is where they are
+                // answered, once, for every screen. The *catalog* is refreshed at
+                // each entry point instead, because each already holds the course
+                // library and the round whose roster the sheet should offer.
+                .task { swings.bind(model: model, live: live) }
         }
     }
 }

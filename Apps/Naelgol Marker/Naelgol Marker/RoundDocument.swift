@@ -192,10 +192,28 @@ final class RoundDocument: ObservableObject {
                 at coordinate: Coordinate? = nil,
                 accuracy: Double? = nil) -> LogEntry? {
         do {
-            guard let entry = try LogStore.shared.append(
-                text, source: .typed, to: folder, hole: hole,
-                holeSource: holeSource, player: player, shot: shot,
-                coordinate: coordinate, accuracy: accuracy) else { return nil }
+            // **An empty sentence is a real entry, provided it is about something**
+            // *(the 2026-08-28 empty-OK rule, now reaching the file: until
+            // 2026-09-03 the text was never empty here, because a `"7: 2"` prefix
+            // was written in front of it)*. `LogEntry.make` refuses an empty text
+            // and must go on refusing it — a *spoken* row with no words is a
+            // recogniser failure — so a fields-only marker is constructed instead.
+            let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry: LogEntry?
+            if said.isEmpty {
+                guard hole != nil || player != nil else { return nil }
+                entry = try LogStore.shared.append(
+                    LogEntry(text: "", lat: coordinate?.lat, lon: coordinate?.lon,
+                             hAcc: accuracy, hole: hole, holeSource: holeSource,
+                             player: player, shot: shot, source: .typed),
+                    to: folder)
+            } else {
+                entry = try LogStore.shared.append(
+                    text, source: .typed, to: folder, hole: hole,
+                    holeSource: holeSource, player: player, shot: shot,
+                    coordinate: coordinate, accuracy: accuracy)
+            }
+            guard let entry else { return nil }
             logs.append(entry)
             return entry
         } catch {
@@ -244,13 +262,61 @@ final class RoundDocument: ObservableObject {
     @discardableResult
     func amendLog(_ log: LogEntry, text: String? = nil, hole: Int?? = nil,
                   player: String?? = nil, shot: Int?? = nil) -> LogEntry? {
-        guard let next = log.edited(text: text, hole: hole,
-                                    player: player, shot: shot) else { return nil }
+        // **Off the chain head read from disk, never the caller's copy.** The row
+        // the editor was opened on is a snapshot: `LogPlacement` appends a converged
+        // coordinate underneath it and a burst grows by superseding, so editing the
+        // snapshot forks the chain and `LogEntry.current` keeps only one head. The
+        // hole view's editor has always done this; this one had not.
+        let head = LogStore.head(ofChainFrom: log.id, in: folder) ?? log
+        guard let next = head.edited(text: text, hole: hole,
+                                     player: player, shot: shot,
+                                     // A person clearing the box means it — see
+                                     // `LogEntry.edited`. Without this every edit of
+                                     // a textless marker was dropped in silence.
+                                     allowingEmptyText: true) else { return nil }
         return appendLog(next)
     }
 
     @discardableResult
     func deleteLog(_ log: LogEntry) -> LogEntry? { appendLog(log.removed()) }
+
+    /// Edit a log **and keep the player's hole numbered** *(user, 2026-09-03)*.
+    ///
+    /// The same pair of rules the hole view's marker editor follows, through the
+    /// same `ShotEditing`: a number landing on one somebody already holds pushes the
+    /// rest of the hole up, and a number taken away brings it down and costs a
+    /// stroke on a hole already holed out. Kept beside `amendLog` rather than inside
+    /// it, because `amendLog` is also how a hole is moved and a sentence corrected,
+    /// neither of which touches a sequence.
+    func editLog(_ log: LogEntry, text: String, hole: Int?,
+                 player: String?, shot: Int?) {
+        guard let next = amendLog(log, text: text, hole: .some(hole),
+                                  player: .some(player), shot: .some(shot))
+        else { return }
+        if let shot, next.isShot {
+            ShotEditing.assigned(shot, to: next, in: folder)
+            reloadLogs()
+        } else if log.isShot {
+            droppedShot(log)
+        }
+    }
+
+    /// Delete a log, renumbering the hole behind it when it was a shot.
+    func removeLog(_ log: LogEntry) {
+        deleteLog(log)
+        if log.isShot { droppedShot(log) }
+    }
+
+    private func droppedShot(_ log: LogEntry) {
+        guard let (player, hole) = ShotEditing.removed(log, in: folder) else { return }
+        reloadLogs()
+        // Only a hole somebody has closed out has a score to correct; an open one
+        // is counted from the markers themselves. Floored at 1, like the score
+        // cell's own swipe.
+        if let previous = state.score(player: player, hole: hole) {
+            setScore(player: player, hole: hole, strokes: max(1, previous - 1))
+        }
+    }
 
     /// Place a log that arrived without a fix. See `LogEntry.placed`.
     @discardableResult

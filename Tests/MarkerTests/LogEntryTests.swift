@@ -281,4 +281,51 @@ final class LogAmendmentTests: XCTestCase {
         XCTAssertFalse(SessionFolder.File.log.isMixedProvenance)
         XCTAssertTrue(SessionFolder.File.journal.isGroundTruth)
     }
+    /// **A person may empty a sentence; a recogniser may not** — see
+    /// `LogEntry.edited`. Every edit of a textless marker was dropped in silence
+    /// until `allowingEmptyText` existed *(2026-09-03)*.
+    func testEmptyingTheTextNeedsSayingSo() {
+        let log = LogEntry(id: "a", t: 1, text: "steve made par", hole: 4,
+                           source: .typed)
+        XCTAssertNil(log.edited(text: "  "))
+        let cleared = log.edited(text: "", allowingEmptyText: true)
+        XCTAssertEqual(cleared?.text, "")
+        XCTAssertEqual(cleared?.supersedes, "a")
+        // The guard is only about the text: a fields-only edit was always fine.
+        XCTAssertEqual(log.edited(shot: .some(2))?.text, "steve made par")
+    }
+    // MARK: - What may land on a row while its convergence is in flight
+
+    private func waiting(_ id: String = "a") -> LogEntry {
+        LogEntry(id: id, t: 1, text: "", hole: nil, source: .typed, mark: true)
+    }
+
+    /// A delete during the wait is final — the mark must not come back placed.
+    func testAConvergenceWillNotResurrectADeletedRow() {
+        let head = waiting().removed(id: "b")
+        XCTAssertFalse(head.acceptsConvergedFix(accuracy: 5, startedFrom: "a"))
+    }
+
+    /// A drag during the wait wins, **even with no accuracy on it** — a moved row
+    /// keeps whatever `hAcc` it had, which for a mark that never got a fix is nil,
+    /// so the accuracy comparison alone cannot see it.
+    func testAHandPlacedPositionBeatsALateFix() {
+        let moved = waiting().placed(lat: 37, lon: -122, hAcc: nil, hole: nil, id: "b")
+        XCTAssertFalse(moved.acceptsConvergedFix(accuracy: 5, startedFrom: "a"))
+    }
+
+    /// An edit that changed only fields is not a refusal: the caller writes off the
+    /// head, so the edit survives being placed.
+    func testAFieldEditDuringTheWaitStillAcceptsTheFix() {
+        let edited = waiting().edited(player: .some("steve"), allowingEmptyText: true,
+                                      id: "b")
+        XCTAssertEqual(edited?.acceptsConvergedFix(accuracy: 5, startedFrom: "a"), true)
+    }
+
+    /// And a better fix is never replaced by a worse one.
+    func testABetterFixIsKept() {
+        let placed = waiting().placed(lat: 37, lon: -122, hAcc: 4, hole: nil, id: "a")
+        XCTAssertFalse(placed.acceptsConvergedFix(accuracy: 9, startedFrom: "a"))
+        XCTAssertTrue(placed.acceptsConvergedFix(accuracy: 2, startedFrom: "a"))
+    }
 }

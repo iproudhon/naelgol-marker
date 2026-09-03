@@ -40,6 +40,11 @@ struct MarkerBar: View {
     var onStartRound: (() -> Void)?
 
     @State private var showLocation = false
+    #if DEBUG
+    /// The panel is behind a tap and there are no scripted taps here, so without
+    /// this it can only be reviewed by describing it. `-marker.sheet location`.
+    private var seedLocation: Bool { DemoSeed.openSheet == "location" }
+    #endif
     @State private var confirmEnd = false
 
     private var isLive: Bool {
@@ -56,6 +61,9 @@ struct MarkerBar: View {
         .padding(.vertical, 10)
         .background(.bar)
         .popover(isPresented: $showLocation) { locationPanel }
+        #if DEBUG
+        .onAppear { if seedLocation { showLocation = true } }
+        #endif
         // **Ending a round is confirmed, and the old control did not have to be.**
         // It said "End round" in red; this one says "Round" in green, because its
         // first job is to report that a round *is* running. A button whose label is
@@ -181,7 +189,26 @@ struct MarkerBar: View {
         return "± " + DistanceDisplay(unit: unit).text(a)
     }
 
+    /// **Scrolling, and a fixed width** *(user, 2026-09-03: "location dialog size
+    /// doesn't fit")*. A popover is sized from its content and then **clipped** by
+    /// the space between the button and the edge of the display — it does not
+    /// shrink its text and it does not scroll on its own, so the bottom rows simply
+    /// were not there. This one is anchored to a control on the bottom bar, which is
+    /// the worst case for that. The width is explicit because `minWidth` leaves the
+    /// ideal width to be inferred from the longest sentence in it, which is the
+    /// other half of the same measurement.
     private var locationPanel: some View {
+        ScrollView {
+            locationBody
+        }
+        // Only scrolls when it has to, so the ordinary case still looks like a
+        // panel rather than a scroll view.
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: 320)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private var locationBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             Toggle("Location tracking", isOn: Binding(
                 get: { live.enabled },
@@ -228,7 +255,6 @@ struct MarkerBar: View {
             }
         }
         .padding(18)
-        .frame(minWidth: 300)
-        .presentationCompactAdaptation(.popover)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

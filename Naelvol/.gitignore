@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+# 171 MB of TensorFlow Lite xcframeworks. `TFLite/Tools/fetch-tflite.sh` puts them
+# back; the version is pinned inside it.
+TFLite/Vendor/

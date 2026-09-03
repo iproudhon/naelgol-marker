@@ -1,4 +1,5 @@
 import SwiftUI
+import NaelvolCore
 import Combine
 import GolfSessionFormat
 import GolfCourse
@@ -160,6 +161,9 @@ struct CourseView: View {
     /// and panned to, never fitted to — see `HoleScreen.focus`.
     var focus: Coordinate?
     @StateObject private var library = CourseLibrary()
+
+    @EnvironmentObject private var swings: SwingFeature
+    @State private var swingRequest: SwingRequest?
     /// The OSM course finder sheet *(user, 2026-08-30)*.
     ///
     /// Seeded from a launch key in DEBUG, because it lives behind a `Menu` and
@@ -321,6 +325,7 @@ struct CourseView: View {
                    onEditHole: onEdit,
                    onPosition: { simulated = $0 },
                    markers: markers,
+                   markLine: markLine,
                    pins: pins,
                    onMovePin: movePin,
                    onAddShot: addShot,
@@ -329,7 +334,11 @@ struct CourseView: View {
                    onMarkerTapped: { id in
                        editingLog = LogEntry.current(logs).first { $0.id == id }
                    },
-                   onHoleChanged: { ref, index in currentHole = (ref, index) }) {
+                   onHoleChanged: { ref, index in currentHole = (ref, index) },
+                   // **Course *and* hole**, because this is the screen where the
+                   // golfer is standing on one. Both chips clear in the sheet.
+                   onSwings: { hole in openSwings(course: course, hole: hole) },
+                   onCaptureSwing: { hole in openCapture(course: course, hole: hole) }) {
             // The same bar the scorecard shows, handed in through the package's
             // `bottomBar` slot — `HoleScreen` is in `GolfMap` and Marker needs the
             // capture stack, which that target must not import.
@@ -352,6 +361,29 @@ struct CourseView: View {
     /// about the round, and it was repeated on every pill. What earns an icon is
     /// being a **shot** — a player and a number — because that is what somebody
     /// scanning the hole is looking for.
+    /// The swing list and the camera, seeded from the hole on screen.
+    ///
+    /// `hole` is the **1-based playing index** `HoleScreen` reports, which is what
+    /// a scorecard column means; the course's own label is looked up from the
+    /// catalog for display and is never the key.
+    private func openSwings(course: Course, hole: Int) {
+        refreshSwingCatalog()
+        // **No round in the filter.** A swing filmed on this hole last month is
+        // exactly what somebody standing on it wants to see; scoping the list to
+        // this round would hide every one of them and look like an empty feature.
+        // The round *is* stamped on a capture, where it belongs.
+        swingRequest = .list(SwingFilter(courseID: course.id, hole: hole))
+    }
+
+    private func openCapture(course: Course, hole: Int) {
+        refreshSwingCatalog()
+        swingRequest = .capture(SwingContext(courseID: course.id, hole: hole, roundID: roundID))
+    }
+
+    private func refreshSwingCatalog() {
+        swings.refreshCatalog(courses: library.courses, players: roster, roundID: roundID)
+    }
+
     private var markers: [HoleMarker] {
         // **Only this hole's** *(user, 2026-08-28: "markers from other holes should
         // not appear")*. They were drawn wherever their coordinates put them, so a
@@ -375,8 +407,48 @@ struct CourseView: View {
                               label: HoleMarker.abbreviate(log.text),
                               shot: log.shot,
                               player: slot.map { roster[$0].name },
-                              colorIndex: slot)
+                              colorIndex: slot,
+                              // An Action Button mark nobody has claimed yet: an
+                              // empty ring rather than a pill reading "mark", and
+                              // it stops being one the moment a player and a shot
+                              // number are put on it. See `LogEntry.mark`.
+                              isMark: log.isUnassignedMark)
         }
+    }
+
+    /// The unassigned marks on **this** hole, oldest press first *(user,
+    /// 2026-09-03: "draw lines between unassigned marks using thin line, ordered by
+    /// entered time")*.
+    ///
+    /// **Ordered by `t`, which is when the button was pressed and not when the row
+    /// last changed.** A mark grows by superseding — `LogPlacement.converge` appends
+    /// the coordinate up to thirty seconds later — and `placed()` carries `t`
+    /// through, so the order is the order of the presses even though the rows landed
+    /// out of order. (`LogEntry.current` already sorts this way; sorting here says
+    /// so locally rather than inheriting it from a function two targets away.)
+    ///
+    /// **A mark with no hole is joined like any other** *(user, 2026-09-03: "for
+    /// lines between unassigned, it includes the marks that don't have hole
+    /// numbers", overruling the same day's first answer, which drew the ring and
+    /// withheld the leg)*.
+    ///
+    /// It is the ordinary case, not the edge one: `hole` means *nearest hole to a
+    /// measured fix*, and `Course.nearestHole` declines beyond 250 m — so a round
+    /// played with no course file, or a mark pressed while walking between two, has
+    /// nil on every row. Withholding the line there withheld it exactly where the
+    /// marks were, which is what the report was.
+    ///
+    /// So the selection is **the same rule `markers` follows**: this hole's rows,
+    /// plus every row that could not be placed on a hole at all. Those are drawn on
+    /// every hole rather than on none, and the line follows what is drawn — the two
+    /// cannot disagree without a leg running to a ring that is not there.
+    private var markLine: [String] {
+        let here = currentHole?.index
+        return LogEntry.current(logs)
+            .filter { $0.isUnassignedMark && $0.hasPosition
+                      && ($0.hole == nil || $0.hole == here) }
+            .sorted { $0.t == $1.t ? $0.id < $1.id : $0.t < $1.t }
+            .map(\.id)
     }
 
     /// A confirmed drag. Written as a **superseding row**, which is how a log is
@@ -512,6 +584,10 @@ struct CourseView: View {
         }
         .modifier(MarkerSheetPresenter(model: model, live: live, marking: $marking,
                                        onDismiss: loadLogs))
+        // A second presenter rather than two more `.sheet` lines: `body` and the
+        // `HoleScreen` call above are both at the type-checker's budget, which is
+        // why `MarkerSheetPresenter` exists in the first place.
+        .modifier(SwingSheetPresenter(swings: swings, request: $swingRequest))
         // **A marker written here has to appear here** *(user, 2026-08-28: "just
         // created marker is not shown in gps hole view")*. `logs` was read once on
         // appear, so an entry the Marker sheet wrote over this very screen was
@@ -793,7 +869,11 @@ struct CourseView: View {
         // The button is disabled without one — `HoleScreen` gates it on the same
         // position this reads — so this is a belt, not the ordinary path.
         guard let fix else { return }
-        let entry = LogEntry(text: "\(hole.ref): \(shot)",
+        // **No text** *(user, 2026-09-03: "no fillers like … '14:1'")*. The hole
+        // and the shot are fields on the row and the title composes them; writing
+        // them into the sentence as well printed `14: 1` as though somebody had
+        // said it, on a row where nobody said anything.
+        let entry = LogEntry(text: "",
                              lat: fix.0.lat, lon: fix.0.lon, hAcc: fix.1,
                              hole: hole.index, holeSource: .user,
                              player: player, shot: shot,
@@ -838,18 +918,25 @@ struct CourseView: View {
     /// `RoundDocument` would replay the journal and rewrite `scorecard.json` for
     /// one number, once per swipe.
     private func holeOut(player: String, strokes: Int?) {
-        guard let hole = currentHole,
-              let name = roundID ?? model.sessionName else { return }
+        guard let hole = currentHole else { return }
+        setScore(player: player, hole: hole.index, strokes: strokes)
+    }
+
+    /// One journalled score. **Split out of `holeOut`** so a shot removed from an
+    /// already-holed-out hole can write the same act — one act, one shape, one
+    /// place that reads `prevStrokes`.
+    private func setScore(player: String, hole: Int, strokes: Int?) {
+        guard let name = roundID ?? model.sessionName else { return }
         let folder = SessionFolder(url: RoundViewModel.sessionsRoot.appendingPathComponent(name))
         // Read the previous value **before** the optimistic write, or `prevStrokes`
         // records the new one and the history says the score never changed.
         var byHole = scorecard.strokes[player] ?? [:]
-        let previous = byHole[hole.index]
+        let previous = byHole[hole]
         // Optimistic, so the legend flips under the thumb rather than after a read.
-        byHole[hole.index] = strokes
+        byHole[hole] = strokes
         scorecard.strokes[player] = byHole
         let entry = JournalEntry(act: .setScore, player: player,
-                                 hole: hole.index, strokes: strokes,
+                                 hole: hole, strokes: strokes,
                                  prevStrokes: previous)
         guard let w = try? folder.writer(.journal) else { return }
         try? w.append(entry)
@@ -885,6 +972,8 @@ struct CourseView: View {
         let folder = SessionFolder(url: RoundViewModel.sessionsRoot.appendingPathComponent(name))
         guard let head = LogStore.head(ofChainFrom: log.id, in: folder) else { return }
         _ = try? LogStore.shared.append(head.removed(), to: folder)
+        // The rest of the player's hole comes down one — see `ShotEditing`.
+        dropped(head, in: folder)
         loadLogs()
     }
 
@@ -893,16 +982,54 @@ struct CourseView: View {
         guard let name = roundID ?? model.sessionName else { return }
         let folder = SessionFolder(url: RoundViewModel.sessionsRoot.appendingPathComponent(name))
         guard let head = LogStore.head(ofChainFrom: log.id, in: folder),
+              // `allowingEmptyText`, because a marker legitimately has none — see
+              // `LogEntry.edited`. Without it every edit of a textless mark was
+              // dropped in silence, which is how this was reported.
               let next = head.edited(text: text, hole: .some(hole),
-                                     player: .some(player), shot: .some(shot))
+                                     player: .some(player), shot: .some(shot),
+                                     allowingEmptyText: true)
         else { return }
         _ = try? LogStore.shared.append(next, to: folder)
+        // **Renumbered after the row is written, off the row as it now stands.**
+        // A number arriving on top of one somebody else holds pushes the rest of
+        // the hole up; a number taken away brings it down. `ShotEditing` reads the
+        // file, so the edit above has to be in it first.
+        if let shot, next.isShot {
+            ShotEditing.assigned(shot, to: next, in: folder)
+        } else if head.isShot {
+            dropped(head, in: folder)
+        }
         loadLogs()
+    }
+
+    /// A shot that stopped being one: renumber the hole, and if the player had
+    /// already holed out, take a stroke off the score *(user, 2026-09-03)*.
+    private func dropped(_ log: LogEntry, in folder: SessionFolder) {
+        guard let (player, hole) = ShotEditing.removed(log, in: folder),
+              let previous = scorecard.strokes[player]?[hole] else { return }
+        // Floored at 1, the same as the score cell's own swipe: a hole was played
+        // in at least one stroke, whatever the markers say.
+        setScore(player: player, hole: hole, strokes: max(1, previous - 1))
     }
 
     private func appear() {
         library.reload()
         library.loadTerrain()
+        #if DEBUG
+        // The swing sheets live behind the pin menu, which `ImageRenderer` cannot
+        // draw and no scripted tap can open — the same reason `marker.sheet` and
+        // `marker.find` exist.
+        if let want = DemoSeed.openSwings, swingRequest == nil {
+            let hole = (currentHole?.1).map { $0 + 1 } ?? DemoSeed.openHole ?? 1
+            refreshSwingCatalog()
+            let id = library.selected?.id
+            // Same seeding as the menu items: the round is stamped on a capture
+            // and is deliberately *not* in the list's filter.
+            swingRequest = want == "capture"
+                ? .capture(SwingContext(courseID: id, hole: hole, roundID: roundID))
+                : .list(SwingFilter(courseID: id, hole: hole))
+        }
+        #endif
         // **Always-authorization is asked for here and only here.** It is the one
         // screen that is a statement of intent — somebody is looking at a hole, on a
         // course — and background tracking (`allowsBackgroundLocationUpdates`) is

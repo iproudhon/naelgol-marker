@@ -161,6 +161,29 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
     /// one. One authority per kind of thing.
     public var supersedes: String?
 
+    /// This row was filed by the Action Button: a position, with nobody and no
+    /// shot number attached to it yet.
+    ///
+    /// *(User, 2026-09-03: "I want these markers to work the same way as when I
+    /// clicked player marker button, just player, shot # unassigned.")* So it is an
+    /// ordinary `LogEntry` written exactly as `CourseView.addShot` writes one — it
+    /// supersedes, converges, is dragged, is tapped, is edited and is read by
+    /// extraction like any other row. This field says only that **nothing has been
+    /// assigned to it yet**, which is what lets the hole view draw it as an empty
+    /// ring instead of a numbered circle, and what makes "show all unassigned
+    /// marks" answerable at all.
+    ///
+    /// **An optional `Bool`, not a new `Source` case.** An unknown enum raw value
+    /// fails the *whole row's* decode and `JSONLReader` skips the line silently, so
+    /// a build or an exported `RoundBundle` that did not know the case would drop
+    /// the mark entirely. A key an older reader has never heard of is simply
+    /// ignored — the direction `RoundBundle.currentVersion`'s rule calls invisible.
+    ///
+    /// It does **not** clear when a player is assigned: `isShot` already answers
+    /// "has this been attributed", and keeping the field is the only record that
+    /// the row began as a button press rather than as something somebody said.
+    public var mark: Bool?
+
     /// A tombstone: the user deleted this log.
     ///
     /// **Not an absence, deliberately.** A proposal that already cites a log has to
@@ -182,7 +205,8 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
                 locale: String? = nil,
                 supersedes: String? = nil,
                 deleted: Bool? = nil,
-                tEnd: Millis? = nil) {
+                tEnd: Millis? = nil,
+                mark: Bool? = nil) {
         self.id = id; self.t = t; self.text = text
         self.lat = lat; self.lon = lon; self.hAcc = hAcc
         self.hole = hole; self.holeSource = holeSource
@@ -190,6 +214,7 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
         self.source = source; self.locale = locale
         self.supersedes = supersedes; self.deleted = deleted
         self.tEnd = tEnd
+        self.mark = mark
     }
 
     /// True when a person chose this row's hole, so nothing may recompute it.
@@ -198,6 +223,11 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
     /// True when this row records a specific shot by a specific player — which is
     /// what makes it drawable as part of a track rather than as a lone note.
     public var isShot: Bool { player != nil && shot != nil }
+
+    /// A mark nobody has attributed yet — the state the hole view draws as an empty
+    /// ring. Stops being true the moment a player and a shot number are put on it,
+    /// which is the whole point of filing one.
+    public var isUnassignedMark: Bool { mark == true && !isShot }
 
     /// Build one, rejecting whitespace. Returns nil rather than writing an empty
     /// row — Siri hands back an empty string when it hears nothing, and a blank
@@ -235,6 +265,34 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
     /// re-transcribe — and for any spoken log recorded before `tEnd` existed.
     public var hasAudioSpan: Bool {
         source == .spoken && (tEnd ?? 0) > t
+    }
+
+    /// May a convergence that started from `startedFrom` write a fix of this
+    /// accuracy onto this chain head?
+    ///
+    /// **In the package because the three ways of getting it wrong are all silent**
+    /// *(user, 2026-09-03: "what if the user deletes or moves while it's in flight")*
+    /// — a convergence holds the radio for up to thirty seconds with the marker on
+    /// screen and every gesture on it live:
+    ///
+    /// - **Deleted.** The row must stay deleted; a fix arriving afterwards is not a
+    ///   reason to bring a mark back.
+    /// - **Moved by hand.** A drag is a deliberate statement about where the shot
+    ///   was played from, and it keeps whatever accuracy the row had — `nil` for a
+    ///   mark that never got a fix — so the accuracy test below cannot see it. The
+    ///   head's id having changed is what says somebody has spoken: nothing else in
+    ///   the app writes a *position* onto a log.
+    /// - **Already better.** Never replace a good fix with a worse one just because
+    ///   it is newer.
+    ///
+    /// An edit that changed only *fields* — a player assigned to a mark, a sentence
+    /// corrected — is not refused: the caller writes off the head, so those survive
+    /// being placed.
+    public func acceptsConvergedFix(accuracy: Double, startedFrom startID: String) -> Bool {
+        if isDeleted { return false }
+        if id != startID && hasPosition { return false }
+        if let existing = hAcc, existing <= accuracy { return false }
+        return true
     }
 
     /// True when this log can place something on a hole. A log without one is
@@ -298,8 +356,22 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
     /// **Setting the hole here marks it `.user`**, because there is no other way to
     /// reach this method: a person is editing the row. That is what stops the next
     /// convergence recomputing it.
+    /// - Parameter allowingEmptyText: let the sentence be emptied.
+    ///
+    ///   **Off by default, and the default is the safety rule** *(2026-09-03)*. The
+    ///   two machine writers — `LiveTranscript` growing a burst and `LogRetranscribe`
+    ///   re-reading one — both hand this whatever the recogniser produced, and an
+    ///   empty result there means *it heard nothing this pass*, not *the golfer
+    ///   deleted the sentence*. Wiping a row on that would lose what was said with
+    ///   nothing anywhere saying why.
+    ///
+    ///   A **person** clearing the box in `LogEditor` is the opposite claim, and
+    ///   since markers may legitimately carry no text at all *(user, 2026-09-03:
+    ///   "empty string is fine")* the editor could not save one without this: every
+    ///   edit of a textless mark returned nil here and was silently dropped.
     public func edited(text newText: String? = nil, hole newHole: Int?? = nil,
                        player newPlayer: String?? = nil, shot newShot: Int?? = nil,
+                       allowingEmptyText: Bool = false,
                        id newID: String = UUID().uuidString.prefix(8).lowercased()
                        ) -> LogEntry? {
         var next = self
@@ -307,7 +379,7 @@ public struct LogEntry: Codable, Sendable, Identifiable, Equatable {
         next.supersedes = id
         if let newText {
             let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
+            guard !trimmed.isEmpty || allowingEmptyText else { return nil }
             next.text = trimmed
         }
         if let newHole {

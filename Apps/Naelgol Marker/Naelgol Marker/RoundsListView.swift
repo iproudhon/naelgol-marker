@@ -1,4 +1,5 @@
 import SwiftUI
+import NaelvolCore
 import GolfSessionFormat
 import GolfCourse
 
@@ -29,6 +30,9 @@ struct RoundsListView: View {
     /// courses itself, it only needs somewhere to put a downloaded one and the ids
     /// already taken, so a save cannot replace a file with placed coordinates in it.
     @StateObject private var library = CourseLibrary()
+
+    @EnvironmentObject private var swings: SwingFeature
+    @State private var swingRequest: SwingRequest?
     @State private var finding = false
     @State private var importing = false
     /// Screenshot support: a file to open on appear, because neither the clipboard
@@ -130,6 +134,16 @@ struct RoundsListView: View {
                         Button { importing = true } label: {
                             Label("Import a round…", systemImage: "square.and.arrow.down")
                         }
+                        Divider()
+                        // **Unfiltered here** — this is the screen reachable with
+                        // no round and no course, so it is the one place the list
+                        // has nothing to be seeded from.
+                        Button { openSwings(SwingFilter()) } label: {
+                            Label("Swings", systemImage: "figure.golf")
+                        }
+                        Button { openCapture(SwingContext()) } label: {
+                            Label("Record a swing", systemImage: "video.badge.plus")
+                        }
                     } label: {
                         Label("More", systemImage: "ellipsis.circle")
                     }
@@ -154,6 +168,22 @@ struct RoundsListView: View {
                     path = [.round(name)]
                 }
             }
+            .modifier(SwingSheetPresenter(swings: swings, request: $swingRequest))
+            #if DEBUG
+            // `-marker.swings YES` with no round opens the unfiltered list here —
+            // the same reason every other sheet has a key: it lives behind a menu,
+            // and a menu is exactly what cannot be opened in this environment.
+            .task {
+                guard let want = DemoSeed.openSwings, path.isEmpty, swingRequest == nil else { return }
+                // `-marker.hole 7` seeds the same filter the hole view would, so
+                // the *filtered* list is reviewable here too — without the
+                // location prompt the hole view raises over it.
+                let seeded = DemoSeed.openHole.map {
+                    SwingFilter(courseID: library.selected?.id, hole: $0)
+                } ?? SwingFilter()
+                want == "capture" ? openCapture(SwingContext()) : openSwings(seeded)
+            }
+            #endif
             .navigationDestination(for: Route.self) { route in
                 switch route {
                 case .newRound:
@@ -254,6 +284,20 @@ struct RoundsListView: View {
         }
     }
     #endif
+
+    /// Open the swing list or the camera, refreshing what naelvol can offer its
+    /// pickers first. **The catalog is rebuilt here rather than held**, because
+    /// this screen owns the course library and a course imported a minute ago must
+    /// appear in the sheet.
+    private func openSwings(_ filter: SwingFilter) {
+        swings.refreshCatalog(courses: library.courses, players: [], roundID: nil)
+        swingRequest = .list(filter)
+    }
+
+    private func openCapture(_ context: SwingContext) {
+        swings.refreshCatalog(courses: library.courses, players: [], roundID: nil)
+        swingRequest = .capture(context)
+    }
 
     private func reload() {
         rounds = SessionIndex.summaries(in: RoundViewModel.sessionsRoot,

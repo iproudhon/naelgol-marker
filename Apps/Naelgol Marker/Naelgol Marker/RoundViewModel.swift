@@ -231,6 +231,9 @@ final class RoundViewModel: ObservableObject {
         session = s
         startedAt = Date()
         state = .recording
+        // The Action Button writes into this folder, from a process that may have
+        // no view model at all. See `QuickMark.activeRoundKey`.
+        QuickMark.setActiveRound(s.folder.url.lastPathComponent)
         markCount = 0
         fixCount = 0
         markPositions = [:]
@@ -299,6 +302,7 @@ final class RoundViewModel: ObservableObject {
         // it is the round's duration, and the gap in the middle is real.
         startedAt = SessionClock.date(from: meta.start)
         state = .recording
+        QuickMark.setActiveRound(folder.url.lastPathComponent)
         markCount = 0
         markPositions = [:]
         startTicking()
@@ -338,6 +342,9 @@ final class RoundViewModel: ObservableObject {
         ticker?.invalidate(); ticker = nil
         state = .ended
         motion = nil
+        // Cleared here as well as guarded on `meta.end` in `QuickMark.activeRound`,
+        // because a pointer at a finished round is a button that looks live.
+        QuickMark.setActiveRound(nil)
     }
 
     // MARK: - The record button

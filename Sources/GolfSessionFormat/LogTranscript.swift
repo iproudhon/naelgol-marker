@@ -29,11 +29,30 @@ public enum LogTranscript {
 
     /// `0:12:04  steve made par` — one line per log, elapsed from the round's own
     /// start rather than a wall clock, which is the same number the row shows.
+    ///
+    /// **A row with no words prints its fields instead** *(2026-09-03)*. Since the
+    /// `"<hole>: <shot>"` prefix was retired, a marker filed from the Action Button
+    /// or from the legend's shot button carries an empty text — and a bare timestamp
+    /// followed by nothing reads as a corrupted file rather than as a position
+    /// somebody stamped. Parenthesised, so it cannot be mistaken for something that
+    /// was said, and with raw ids in it, because this is the plain-text rendering:
+    /// what the app actually copies is `RoundExport`, which is JSON and resolves
+    /// names properly.
     public static func text(_ logs: [LogEntry], start: Millis) -> String {
         logs
             .sorted { $0.t == $1.t ? $0.id < $1.id : $0.t < $1.t }
-            .map { "\(elapsed($0.t, from: start))  \($0.text)" }
+            .map { "\(elapsed($0.t, from: start))  \(body(of: $0))" }
             .joined(separator: "\n")
+    }
+
+    private static func body(of log: LogEntry) -> String {
+        let said = log.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard said.isEmpty else { return said }
+        var parts: [String] = [log.mark == true ? "mark" : "marker"]
+        if let hole = log.hole { parts.append("hole \(hole)") }
+        if let player = log.player { parts.append(player) }
+        if let shot = log.shot { parts.append("shot \(shot)") }
+        return "(" + parts.joined(separator: " · ") + ")"
     }
 
     /// `H:MM:SS` since the round began, floored at zero — a log can predate

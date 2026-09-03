@@ -86,6 +86,9 @@ public struct VectorHoleView: View {
 
     /// Recorded log entries, drawn where they were said. See `HoleMarker`.
     public var markers: [HoleMarker] = []
+    /// The unassigned marks to join, **in the order they were pressed**. See
+    /// `HoleMarker.line`.
+    public var markLine: [String] = []
     /// The move a confirmation is currently asking about, drawn as a **proposal**.
     ///
     /// *(2026-08-28. The confirmation used to be an alert covering the hole, so
@@ -139,6 +142,7 @@ public struct VectorHoleView: View {
                 onCenterMeasure: ((Int, Coordinate) -> Void)? = nil,
                 onTapMeasure: ((Int) -> Void)? = nil,
                 markers: [HoleMarker] = [],
+                markLine: [String] = [],
                 pendingMarker: (id: String, at: Coordinate)? = nil,
                 pin: Coordinate? = nil,
                 onMovePin: ((Coordinate) -> Void)? = nil,
@@ -167,6 +171,7 @@ public struct VectorHoleView: View {
         self.onCenterMeasure = onCenterMeasure
         self.onTapMeasure = onTapMeasure
         self.markers = markers
+        self.markLine = markLine
         self.pendingMarker = pendingMarker
         self.pin = pin
         self.onMovePin = onMovePin
@@ -682,6 +687,26 @@ public struct VectorHoleView: View {
         // what happened: the whole layer stopped taking touches.
         var trackCtx = ctx
         trackCtx.opacity = markerDisplay.opacity
+
+        // **The marks, joined in press order, under the player tracks** *(user,
+        // 2026-09-03)*. Drawn first so a player's track — shots somebody assigned a
+        // number to — is never crossed by the fainter claim. It dims with the
+        // markers and disappears with them, since the ids resolve against `markers`
+        // and an `off` layer is sent none: "a line joining pills that are not drawn
+        // is a line between nothing and nothing."
+        //
+        // **No number on any leg.** A player's leg earns one only when it is
+        // `consecutive`, and a mark has no number at all, so "did this leg skip
+        // one" is unanswerable here — a distance printed on it would state a shot
+        // nobody has said was one. Solid, not dashed: dashed already means aiming,
+        // proposed or pending on this screen.
+        let marks = HoleMarker.line(markLine, in: markers, moving: markerDrag)
+        if marks.count >= 2 {
+            trackCtx.stroke(path(marks, closed: false), with: .color(style.markLineInk),
+                            style: StrokeStyle(lineWidth: style.markLineWidth,
+                                               lineCap: .round, lineJoin: .round))
+        }
+
         for track in drawnTracks {
             // **No early `continue` on the shot count.** It used to skip any track
             // with fewer than two shots, which drew *nothing at all* for a player
@@ -956,7 +981,10 @@ public struct VectorHoleView: View {
             // steve`, which states three times over what the colour and the legend
             // already say once. Same height as a pill, so the leader, the stacking
             // and the gap under the point are one set of rules rather than two.
-            let w = m.isShot ? 22 : 8 + iconWidth + textWidth + 8
+            // A mark is a circle too — an *empty* one. Same width as a shot's
+            // because it is the same object with nothing assigned to it yet, which
+            // is what makes the two comparable at a glance on a busy hole.
+            let w = (m.isShot || m.isMark) ? 22 : 8 + iconWidth + textWidth + 8
             // Sits **under** the point *(user, 2026-08-29: "marker display label
             // under the point")*, rather than on it — the dot the pill is a claim
             // about must not be the thing the pill covers. **Stacked downward when
@@ -982,7 +1010,17 @@ public struct VectorHoleView: View {
             let ink = m.tint ?? style.ink
             ctx.fill(Path(roundedRect: pill, cornerRadius: 11),
                      with: .color(.black.opacity(0.66)))
-            if m.isShot {
+            if m.isMark {
+                // **Empty on purpose.** A pill reading "mark" would print the same
+                // word a dozen times on one hole, and the ring is the only thing on
+                // the layer that says *nobody has claimed this yet* — the state the
+                // Action Button leaves a row in. Everything else about it is a
+                // shot marker: same slot, same handle, same tap, same drag.
+                let r = style.markRadius
+                ctx.stroke(Path(ellipseIn: CGRect(x: pill.midX - r, y: pill.midY - r,
+                                                  width: r * 2, height: r * 2)),
+                           with: .color(style.markInk), lineWidth: 1.5)
+            } else if m.isShot {
                 // Centred, because there is nothing else in it.
                 ctx.draw(Text(title)
                             .font(.system(size: 12, weight: .bold).monospacedDigit())
@@ -1013,8 +1051,14 @@ public struct VectorHoleView: View {
                 ctx.stroke(leader, with: .color(style.ink.opacity(0.45)), lineWidth: 1)
             }
             // The point itself, so what the pill *claims* is visible under it.
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5)),
-                     with: .color(m.tint ?? style.flag))
+            // **A mark's is bigger, and bone rather than red** *(user, 2026-09-03)*:
+            // it is the only point on this layer nothing else draws — a shot's dot
+            // comes from its track — and it is the thing the ring above it and the
+            // line through it are both claims about.
+            let dot = m.isMark ? style.markDotRadius : 2.5
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - dot, y: c.y - dot,
+                                            width: dot * 2, height: dot * 2)),
+                     with: .color(m.isMark ? style.markInk : (m.tint ?? style.flag)))
 
             // Where it is being *asked* to go. See `pendingMarker`.
             if let pending = pendingMarker, pending.id == m.id {

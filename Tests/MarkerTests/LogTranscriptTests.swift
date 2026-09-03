@@ -42,4 +42,16 @@ final class LogTranscriptTests: XCTestCase {
     func testEmptyLogsGiveEmptyText() {
         XCTAssertEqual(LogTranscript.text([], start: 0), "")
     }
+
+    /// A marker with no words prints its fields, never a bare timestamp — see
+    /// `LogTranscript.text`. *(2026-09-03, when the `"<hole>: <shot>"` prefix that
+    /// had always made these rows non-empty was retired.)*
+    func testATextlessRowPrintsItsFields() {
+        let mark = LogEntry(id: "mk0", t: 1_000, text: "", hole: 4, source: .typed,
+                            mark: true)
+        let shot = LogEntry(id: "s1", t: 2_000, text: "", hole: 4, player: "steve",
+                            shot: 3, source: .typed)
+        XCTAssertEqual(LogTranscript.text([mark, shot], start: 1_000),
+                       "0:00:00  (mark · hole 4)\n0:00:01  (marker · hole 4 · steve · shot 3)")
+    }
 }

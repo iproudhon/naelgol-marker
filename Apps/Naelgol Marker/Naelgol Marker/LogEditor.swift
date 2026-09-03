@@ -1,5 +1,6 @@
 import SwiftUI
 import GolfSessionFormat
+import GolfMap
 
 /// Correcting an entry: what it says, and what it is about.
 ///
@@ -72,6 +73,17 @@ struct LogEditor: View {
         _shot = State(initialValue: log.shot)
     }
 
+    /// `steve · Hole 4 · 4th: on in two` — see `LogTitle`, which the entry list
+    /// uses too *(user, 2026-09-03)*.
+    ///
+    /// Built from **the fields as they currently stand**, not from the row on disk:
+    /// the title answers "what am I editing", so it has to follow a player being
+    /// picked.
+    private var title: String {
+        LogTitle.of(player: playerName, holeRef: hole == nil ? nil : holeRef,
+                    shot: shot, text: draft)
+    }
+
     private var holeRef: String {
         holes.first { $0.index == hole }?.ref ?? hole.map(String.init) ?? "—"
     }
@@ -90,30 +102,45 @@ struct LogEditor: View {
                     } else {
                         // Tap turns it into a field — X13, "text editable upon
                         // clicking". Drawn as ordinary text so the sentence reads
-                        // as a sentence, with the hint saying what a tap does; an
-                        // affordance nobody can see is one nobody finds.
+                        // as a sentence. **The "Tap to edit" hint is gone** *(user,
+                        // 2026-09-03: "no label needed")*: it was a caption under
+                        // every entry explaining a tap, on a screen whose rows are
+                        // all tappable.
                         Button {
                             editingText = true
-                            typing = true
+                            // **Focus on the next turn, never in the same one**
+                            // *(user, 2026-09-03: "text box in marker editor is not
+                            // editable")*. `@FocusState` names a field that has to
+                            // *exist*: assigning it in the same update that flips
+                            // `editingText` targets a `TextField` SwiftUI has not
+                            // built yet, so the assignment is dropped and the tap
+                            // produces a field with no keyboard — which reads as a
+                            // box that cannot be typed in. Same shape as
+                            // `HoleScreen.bump`'s clear and `centerOn`'s reset.
+                            Task { @MainActor in typing = true }
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(log.text)
-                                    .foregroundStyle(.primary)
-                                    .multilineTextAlignment(.leading)
-                                Text("Tap to edit")
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            // **A placeholder when there is nothing to read.** A
+                            // marker filed from the Action Button has no text at
+                            // all *(user, 2026-09-03: "empty string is fine")*, and
+                            // an empty row is one nobody can tell is tappable. This
+                            // is not the "Tap to edit" caption that was removed —
+                            // that sat under a sentence that was already there.
+                            Text(log.text.isEmpty ? "Add a note" : log.text)
+                                .foregroundStyle(log.text.isEmpty ? .secondary : .primary)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, minHeight: 22,
+                                       alignment: .leading)
+                                // The whole row is the target. An empty marker's
+                                // label is a few words wide and the rest of the row
+                                // was dead space, which is most of what a thumb
+                                // lands on.
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
-                } header: {
-                    Text("What was said")
-                } footer: {
-                    Text(footer)
                 }
 
-                Section("What it is about") {
+                Section {
                     Picker("Hole", selection: $hole) {
                         Text("No hole").tag(Int?.none)
                         ForEach(holes, id: \.index) { h in
@@ -147,13 +174,22 @@ struct LogEditor: View {
                     .disabled(player == nil)
                 }
 
+            }
+            // **The title says what the entry is about** *(user, 2026-09-03:
+            // "Player name · Hole # · Shot #")*. It replaces the two section
+            // headers that used to say it in words — the fields are directly
+            // underneath and label themselves.
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            // **Delete is a top-level button** *(user, 2026-09-03)*. It was the
+            // last row of the form, under a stepper and below the fold on a short
+            // screen. **Still confirmed**: moving it to the navigation bar makes a
+            // mis-tap easier, not harder, and it is used through a glove.
+            .toolbar {
                 if let delete {
-                    Section {
-                        // Confirmed, because it is destructive and the row above it
-                        // is a stepper — a mis-tap on a phone in a glove is exactly
-                        // what this dialog is used through.
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button(role: .destructive) { confirmingDelete = true } label: {
-                            Label("Delete this entry", systemImage: "trash")
+                            Label("Delete", systemImage: "trash")
                         }
                         .confirmationDialog("Delete this entry?",
                                             isPresented: $confirmingDelete,
@@ -168,8 +204,6 @@ struct LogEditor: View {
                     }
                 }
             }
-            .navigationTitle(log.isShot ? "\(holeRef) · shot \(log.shot ?? 0)" : "Entry")
-            .navigationBarTitleDisplayMode(.inline)
             // **At the bottom, the same as the create sheet** *(user, 2026-08-28:
             // "cancel and ok should be at the bottom")*. The two dialogs are one
             // arrangement — that is X15's whole point — so the decision buttons
@@ -203,13 +237,4 @@ struct LogEditor: View {
         draft != log.text || hole != log.hole || player != log.player || shot != log.shot
     }
 
-    /// Says what editing does and does not change. Worth the two lines: a user who
-    /// thinks they have overwritten the transcription would not expect the
-    /// original to still be quoted under an old proposal.
-    private var footer: String {
-        let heard = log.source == .spoken
-            ? "This is what was heard; the original is kept."
-            : "The original is kept."
-        return heard + " Anything already read from it keeps quoting what was read."
-    }
 }

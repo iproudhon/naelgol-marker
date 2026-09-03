@@ -73,6 +73,45 @@ public struct HoleStyle: Sendable {
     /// exists for the stacked case.
     public var markerLabelGap: Double = 14
 
+    /// The radius of an unassigned **mark**'s ring, in points.
+    ///
+    /// Deliberately smaller than a shot's circle and drawn hollow: a mark is a
+    /// position somebody stamped in a pocket, and a false positive is expected —
+    /// it must read as a note on the hole rather than as a shot that was played.
+    /// See `HoleMarker.isMark`.
+    public var markRadius: Double = 5.5
+    /// A mark's ink. The ordinary marker ink at half strength, so a hole carrying a
+    /// dozen of them stays readable underneath.
+    public var markInk = Color(red: 0.937, green: 0.953, blue: 0.925).opacity(0.65)
+    /// The dot drawn **at a mark's own coordinate**, in points *(user, 2026-09-03:
+    /// "position dot is too small. drag handle size is fine")*.
+    ///
+    /// Twice the 2.5 every other marker's point gets, because a mark is the only
+    /// thing on this layer whose point is otherwise **undrawn**: a shot's dot comes
+    /// from its `PlayerTrack`, and a mark has no track. The handle is unchanged —
+    /// `markerGrabRadius` was never the complaint; what was missing was something to
+    /// see under the finger.
+    public var markDotRadius: Double = 5
+    /// The ink of the line joining one mark to the next.
+    ///
+    /// **Fainter than the ring, and fainter again after the first attempt** *(user,
+    /// 2026-09-03: "lines are too prominent. I want even thinner lines with lower
+    /// opacity", after "can't see the lines" the same day)*. The two reports are not
+    /// in conflict: the first was a satellite hairline with no casing under it,
+    /// which was invisible over grass at any opacity. With the casing there, the
+    /// line can go back under the ring it joins — it is a trace of the order things
+    /// were pressed in, not a thing anybody clubs off.
+    public var markLineInk = Color(red: 0.937, green: 0.953, blue: 0.925).opacity(0.45)
+    /// The line joining one mark to the next, in points *(user, 2026-09-03: "draw
+    /// lines between unassigned marks using thin line, ordered by entered time")*.
+    ///
+    /// **Thinner than `shotLineWidth`**, which is already the slim one. A player's
+    /// track joins shots somebody assigned a number to; this joins presses of a
+    /// hardware button, in the order they were pressed, with the false positives
+    /// still in — so it has to read as the fainter claim of the two on a hole
+    /// carrying both.
+    public var markLineWidth: Double = 0.7
+
     /// Widths in **metres**, not points — they scale with the hole so a par 3 and a
     /// par 5 read the same.
     ///
